@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Polymarket Order UI (MetaMask)</title>
+    <style>
+      body { font-family: system-ui, Arial; margin: 20px; max-width: 860px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; margin: 10px 0; }
+      label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 4px; }
+      input, select, button, textarea { padding: 10px; font-size: 14px; width: 260px; }
+      button { width: auto; cursor: pointer; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 14px 0; }
+      .ok { color: #0a7a0a; }
+      .bad { color: #b00020; }
+      pre { background: #0b1020; color: #e6e6e6; padding: 12px; border-radius: 10px; overflow: auto; }
+      .small { font-size: 12px; opacity: 0.8; }
+      .wide { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <h2>Polymarket CLOB — Place Order (MetaMask EOA)</h2>
+
+    <div class="card">
+      <div class="row">
+        <button id="btnConnect">1) Connect MetaMask</button>
+        <button id="btnDerive" disabled>2) Derive / Load User API Creds</button>
+        <button id="btnClearCreds">Clear Saved Creds</button>
+      </div>
+      <div id="status" class="small"></div>
+      <div class="small">
+        Network required: <b>Polygon Mainnet (chainId 137)</b>. Trading uses USDC.e collateral on Polygon. :contentReference[oaicite:2]{index=2}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Order Params</h3>
+      <div class="row">
+        <div>
+          <label>Token ID</label>
+          <input id="tokenId" placeholder="TOKEN_ID (from Gamma API)" />
+        </div>
+
+        <div>
+          <label>Side</label>
+          <select id="side">
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Price</label>
+          <input id="price" type="number" step="0.0001" placeholder="0.50" />
+        </div>
+
+        <div>
+          <label>Size (shares)</label>
+          <input id="size" type="number" step="0.0001" placeholder="10" />
+        </div>
+
+        <div>
+          <label>Order Type</label>
+          <select id="orderType">
+            <option value="GTC">GTC</option>
+            <option value="IOC">IOC</option>
+            <option value="FOK">FOK</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="btnVerify" disabled>3) Verify</button>
+        <button id="btnPlace" disabled>4) Place Order</button>
+      </div>
+
+      <div class="small">
+        Tip: Token IDs are obtained via Gamma market endpoints. :contentReference[oaicite:3]{index=3}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Output</h3>
+      <pre id="log"></pre>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
