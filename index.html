@@ -16,6 +16,48 @@
       pre { background: #0b1020; color: #e6e6e6; padding: 12px; border-radius: 10px; overflow: auto; }
       .small { font-size: 12px; opacity: 0.8; }
       .wide { width: 100%; }
+
+      /* Tabs */
+      .tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: 2px solid #ddd; }
+      .tab { padding: 12px 24px; cursor: pointer; border: 1px solid transparent; border-bottom: none; background: #f5f5f5; margin-bottom: -2px; }
+      .tab.active { background: #fff; border-color: #ddd; border-bottom-color: #fff; font-weight: bold; }
+      .tab-content { display: none; padding: 16px; border: 1px solid #ddd; border-top: none; }
+      .tab-content.active { display: block; }
+
+      /* Orders & Positions */
+      .order-card, .position-card, .trade-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 10px 0; background: #fafafa; }
+      .order-header, .position-header, .trade-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .order-side, .trade-side { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+      .order-side.buy, .trade-side.buy { background: #d4edda; color: #155724; }
+      .order-side.sell, .trade-side.sell { background: #f8d7da; color: #721c24; }
+      .order-id, .order-status { font-size: 12px; color: #666; }
+      .order-details, .position-details, .trade-details { font-size: 13px; }
+      .order-row, .position-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee; }
+      .order-row:last-child, .position-row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 500; }
+      .order-actions, .position-actions { margin-top: 10px; }
+      .btn-cancel-order, .btn-close-position { background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+      .btn-cancel-order:hover, .btn-close-position:hover { background: #c82333; }
+      .no-data { text-align: center; color: #666; padding: 20px; }
+      .position-outcome { font-weight: bold; }
+      .position-size { color: #0066cc; font-weight: 500; }
+      .profit { color: #28a745; }
+      .loss { color: #dc3545; }
+      .section-actions { margin-bottom: 16px; display: flex; gap: 10px; }
+      .section-actions button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+      .section-actions button:hover { background: #0056b3; }
+      .section-actions button.danger { background: #dc3545; }
+      .section-actions button.danger:hover { background: #c82333; }
+
+      /* Position specific */
+      .position-title { font-weight: bold; font-size: 14px; flex: 1; }
+      .position-outcome-badge { padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+      .position-outcome-badge.yes { background: #d4edda; color: #155724; }
+      .position-outcome-badge.no { background: #f8d7da; color: #721c24; }
+      .btn-copy-asset { background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px; }
+      .btn-copy-asset:hover { background: #5a6268; }
+      .asset-id { font-family: monospace; font-size: 11px; }
     </style>
   </head>
   <body>
@@ -26,6 +68,7 @@
         <button id="btnConnect">1) Connect MetaMask</button>
         <button id="btnDerive" disabled>2) Derive / Load User API Creds</button>
         <button id="btnClearCreds">Clear Saved Creds</button>
+        <button id="btnRecheckApprovals" disabled>Recheck Approvals</button>
       </div>
       <div id="status" class="small"></div>
       <div class="small">
@@ -79,11 +122,72 @@
       </div>
     </div>
 
+    <!-- Tabs for Orders, Positions, Trades -->
+    <div class="card">
+      <div class="tabs">
+        <div class="tab active" data-tab="orders">Open Orders</div>
+        <div class="tab" data-tab="positions">Positions</div>
+        <div class="tab" data-tab="trades">Trade History</div>
+      </div>
+
+      <!-- Open Orders Tab -->
+      <div id="ordersContainer" class="tab-content active" data-tab-content="orders">
+        <div class="section-actions">
+          <button id="btnRefreshOrders">Refresh Orders</button>
+          <button id="btnCancelAllOrders" class="danger">Cancel All Orders</button>
+        </div>
+        <div id="ordersList">
+          <p class="no-data">Click "Refresh Orders" to load your open orders.</p>
+        </div>
+      </div>
+
+      <!-- Positions Tab -->
+      <div id="positionsContainer" class="tab-content" data-tab-content="positions">
+        <div class="section-actions">
+          <button id="btnRefreshPositions">Refresh Positions</button>
+        </div>
+        <div id="positionsList">
+          <p class="no-data">Click "Refresh Positions" to load your positions.</p>
+        </div>
+      </div>
+
+      <!-- Trade History Tab -->
+      <div id="tradesContainer" class="tab-content" data-tab-content="trades">
+        <div class="section-actions">
+          <button id="btnRefreshTrades">Refresh Trade History</button>
+        </div>
+        <div id="tradesList">
+          <p class="no-data">Click "Refresh Trade History" to load your recent trades.</p>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h3>Output</h3>
       <pre id="log"></pre>
     </div>
 
     <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/app.ts"></script>
+    <script>
+      // Tab switching logic
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          const tabName = tab.dataset.tab;
+
+          // Update active tab
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+
+          // Update active content
+          document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+            if (content.dataset.tabContent === tabName) {
+              content.classList.add('active');
+            }
+          });
+        });
+      });
+    </script>
   </body>
 </html>

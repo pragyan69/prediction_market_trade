@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { ClobClient, Side, OrderType } from "@polymarket/clob-client";
 import type { ApiKeyCreds, TickSize } from "@polymarket/clob-client";
+import { updateState } from "./utils/state";
 
 const HOST = "https://clob.polymarket.com";
 const CHAIN_ID = 137; // Polygon mainnet
@@ -34,6 +35,7 @@ const ERC20_ABI = [
 const CTF_ERC1155_ABI = [
   "function isApprovedForAll(address owner,address operator) view returns (bool)",
   "function setApprovalForAll(address operator,bool approved)",
+  "function balanceOf(address account, uint256 id) view returns (uint256)",
 ];
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -46,6 +48,7 @@ const btnDerive = $("btnDerive") as HTMLButtonElement;
 const btnVerify = $("btnVerify") as HTMLButtonElement;
 const btnPlace = $("btnPlace") as HTMLButtonElement;
 const btnClearCreds = $("btnClearCreds") as HTMLButtonElement;
+const btnRecheckApprovals = $("btnRecheckApprovals") as HTMLButtonElement;
 
 const tokenIdEl = $("tokenId") as HTMLInputElement;
 const sideEl = $("side") as HTMLSelectElement;
@@ -116,9 +119,11 @@ async function buildTradingClient() {
   if (!signerAddress) throw new Error("Signer address missing.");
 
   // ✅ For EOA (signatureType=0) funder is your EOA address.
-  // If you’re trading through Polymarket.com proxy wallet, you must use signatureType=1/2 and set funder to proxy address.
+  // If you're trading through Polymarket.com proxy wallet, you must use signatureType=1/2 and set funder to proxy address.
   const funder = signerAddress;
   client = new ClobClient(HOST, CHAIN_ID, signer as any, apiCreds, SIGNATURE_TYPE, funder);
+  // Sync client to shared state for orders/positions modules
+  updateState({ client });
 }
 
 function parsePositiveNumber(name: string, value: string) {
@@ -187,6 +192,8 @@ async function ensureApprovals(owner: string, negRisk: boolean) {
 
   if (negRisk) {
     await setApprovalForAllIfNeeded(ctf, owner, ADDRESSES.NEG_RISK_CTF_EXCHANGE, "NEG_RISK_CTF_EXCHANGE");
+    // Also approve NEG_RISK_ADAPTER for ERC1155 (needed for selling on neg-risk markets)
+    await setApprovalForAllIfNeeded(ctf, owner, ADDRESSES.NEG_RISK_ADAPTER, "NEG_RISK_ADAPTER");
   }
 }
 
@@ -194,18 +201,26 @@ async function debugBalances(owner: string, negRisk: boolean) {
   if (!signer) return;
 
   const usdc = new ethers.Contract(ADDRESSES.USDCe, ERC20_ABI, signer);
+  const ctf = new ethers.Contract(ADDRESSES.CTF, CTF_ERC1155_ABI, signer);
   const decimals: number = await usdc.decimals();
   const bal: ethers.BigNumber = await usdc.balanceOf(owner);
 
   const allowanceCTF = await usdc.allowance(owner, ADDRESSES.CTF);
   const allowanceEx = await usdc.allowance(owner, ADDRESSES.CTF_EXCHANGE);
 
+  // Check ERC1155 approvals (needed for SELLING outcome tokens)
+  const ctfApprovedForExchange: boolean = await ctf.isApprovedForAll(owner, ADDRESSES.CTF_EXCHANGE);
+
   let allowanceNegEx = ethers.BigNumber.from(0);
   let allowanceNegAdapter = ethers.BigNumber.from(0);
+  let ctfApprovedForNegRiskExchange = false;
+  let ctfApprovedForNegRiskAdapter = false;
 
   if (negRisk) {
     allowanceNegEx = await usdc.allowance(owner, ADDRESSES.NEG_RISK_CTF_EXCHANGE);
     allowanceNegAdapter = await usdc.allowance(owner, ADDRESSES.NEG_RISK_ADAPTER);
+    ctfApprovedForNegRiskExchange = await ctf.isApprovedForAll(owner, ADDRESSES.NEG_RISK_CTF_EXCHANGE);
+    ctfApprovedForNegRiskAdapter = await ctf.isApprovedForAll(owner, ADDRESSES.NEG_RISK_ADAPTER);
   }
 
   write({
@@ -223,10 +238,71 @@ async function debugBalances(owner: string, negRisk: boolean) {
           : {}),
       },
     },
+    ctfERC1155: {
+      token: ADDRESSES.CTF,
+      approvedForSelling: {
+        CTF_EXCHANGE: ctfApprovedForExchange,
+        ...(negRisk ? {
+          NEG_RISK_CTF_EXCHANGE: ctfApprovedForNegRiskExchange,
+          NEG_RISK_ADAPTER: ctfApprovedForNegRiskAdapter,
+        } : {}),
+      },
+    },
   });
 }
 
 btnClearCreds.onclick = () => clearCreds();
+
+// Recheck and display all approval statuses, with option to force re-approve
+btnRecheckApprovals.onclick = async () => {
+  try {
+    if (!signer || !signerAddress) throw new Error("Connect MetaMask first.");
+    await ensurePolygon();
+
+    const ctf = new ethers.Contract(ADDRESSES.CTF, CTF_ERC1155_ABI, signer);
+
+    // Check all ERC1155 approvals
+    const approvals = {
+      CTF_EXCHANGE: await ctf.isApprovedForAll(signerAddress, ADDRESSES.CTF_EXCHANGE),
+      NEG_RISK_CTF_EXCHANGE: await ctf.isApprovedForAll(signerAddress, ADDRESSES.NEG_RISK_CTF_EXCHANGE),
+      NEG_RISK_ADAPTER: await ctf.isApprovedForAll(signerAddress, ADDRESSES.NEG_RISK_ADAPTER),
+    };
+
+    write({
+      erc1155ApprovalsForSelling: {
+        owner: signerAddress,
+        CTF_EXCHANGE: { address: ADDRESSES.CTF_EXCHANGE, approved: approvals.CTF_EXCHANGE },
+        NEG_RISK_CTF_EXCHANGE: { address: ADDRESSES.NEG_RISK_CTF_EXCHANGE, approved: approvals.NEG_RISK_CTF_EXCHANGE },
+        NEG_RISK_ADAPTER: { address: ADDRESSES.NEG_RISK_ADAPTER, approved: approvals.NEG_RISK_ADAPTER },
+      },
+    });
+
+    // Check which ones are missing and offer to fix
+    const missing: string[] = [];
+    if (!approvals.CTF_EXCHANGE) missing.push("CTF_EXCHANGE");
+    if (!approvals.NEG_RISK_CTF_EXCHANGE) missing.push("NEG_RISK_CTF_EXCHANGE");
+    if (!approvals.NEG_RISK_ADAPTER) missing.push("NEG_RISK_ADAPTER");
+
+    if (missing.length > 0) {
+      setStatus(`Missing ERC1155 approvals: ${missing.join(", ")}. Setting them now...`, true);
+
+      for (const name of missing) {
+        const address = ADDRESSES[name as keyof typeof ADDRESSES];
+        setStatus(`Approving CTF → ${name}... Confirm in MetaMask`, true);
+        const tx = await ctf.setApprovalForAll(address, true);
+        write({ approval: `CTF setApprovalForAll (${name})`, txHash: tx.hash });
+        await tx.wait();
+      }
+
+      setStatus("All ERC1155 approvals set! Try selling again.", true);
+    } else {
+      setStatus("All ERC1155 approvals already set ✅", true);
+    }
+  } catch (e: any) {
+    setStatus(e.message || String(e), false);
+    write({ error: e.message || String(e) });
+  }
+};
 
 btnConnect.onclick = async () => {
   try {
@@ -244,6 +320,10 @@ btnConnect.onclick = async () => {
     await ensurePolygon();
 
     apiCreds = loadCredsFromStorage();
+    // Sync loaded creds to shared state
+    if (apiCreds) {
+      updateState({ apiCreds });
+    }
 
     setStatus(
       `Connected: ${signerAddress} | ${apiCreds ? "Loaded saved User API creds ✅" : "No User API creds yet"}`,
@@ -253,9 +333,12 @@ btnConnect.onclick = async () => {
     btnDerive.disabled = false;
     btnVerify.disabled = false;
     btnPlace.disabled = true;
+    btnRecheckApprovals.disabled = false;
 
     write({ connected: true, address: signerAddress, chainId: CHAIN_ID });
-    // we don’t know negRisk yet; log basic balance
+    // Sync state to shared module
+    updateState({ provider, signer, signerAddress, apiCreds });
+    // we don't know negRisk yet; log basic balance
     await debugBalances(signerAddress, false);
   } catch (e: any) {
     setStatus(e.message || String(e), false);
@@ -284,6 +367,8 @@ btnDerive.onclick = async () => {
     }
 
     saveCredsToStorage(apiCreds);
+    // Sync API creds to shared state
+    updateState({ apiCreds });
     await buildTradingClient();
 
     setStatus("Derived & saved User API creds ✅ (L2 ready)", true);
@@ -324,6 +409,8 @@ btnVerify.onclick = async () => {
     }
 
     lastVerify = { tickSize, negRisk, minOrderSize };
+    // Sync to shared state
+    updateState({ lastVerify });
 
     btnPlace.disabled = !apiCreds;
 
@@ -334,6 +421,24 @@ btnVerify.onclick = async () => {
 
     write({ verified: true, tokenID, side: sideEl.value, price, size, tickSize, negRisk, book });
     if (signerAddress) await debugBalances(signerAddress, negRisk);
+
+    // Check outcome token balance for this specific token ID (important for SELL orders)
+    if (signerAddress && sideEl.value === "SELL") {
+      const ctf = new ethers.Contract(ADDRESSES.CTF, CTF_ERC1155_ABI, signer);
+      try {
+        const tokenBalance: ethers.BigNumber = await ctf.balanceOf(signerAddress, tokenID);
+        write({
+          outcomeTokenBalance: {
+            tokenID,
+            owner: signerAddress,
+            balance: ethers.utils.formatUnits(tokenBalance, 6), // CTF tokens use 6 decimals
+            balanceRaw: tokenBalance.toString(),
+          },
+        });
+      } catch (err: any) {
+        write({ outcomeTokenBalanceError: err.message });
+      }
+    }
   } catch (e: any) {
     setStatus(e.message || String(e), false);
     write({ error: e.message || String(e) });
@@ -366,17 +471,13 @@ btnPlace.onclick = async () => {
 
     const side = sideEl.value === "BUY" ? Side.BUY : Side.SELL;
 
-    const orderType =
-      orderTypeEl.value === "FOK"
-        ? OrderType.FOK
-        : orderTypeEl.value === "FAK"
-        ? OrderType.FAK
-        : orderTypeEl.value === "GTD"
-        ? OrderType.GTD
-        : OrderType.GTC;
+    // Note: createAndPostOrder only supports GTC and GTD
+    // FOK/FAK are immediate-or-cancel types that use different methods
+    const orderType = orderTypeEl.value === "GTD" ? OrderType.GTD : OrderType.GTC;
 
     setStatus("Submitting order…", true);
 
+    if (!client) throw new Error("Client not initialized.");
     const resp = await client.createAndPostOrder(
       { tokenID, price, size, side },
       { tickSize: lastVerify.tickSize, negRisk: lastVerify.negRisk },
