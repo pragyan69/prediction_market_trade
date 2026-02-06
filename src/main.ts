@@ -48,7 +48,11 @@ const btnDerive = $("btnDerive") as HTMLButtonElement;
 const btnVerify = $("btnVerify") as HTMLButtonElement;
 const btnPlace = $("btnPlace") as HTMLButtonElement;
 const btnClearCreds = $("btnClearCreds") as HTMLButtonElement;
-const btnRecheckApprovals = $("btnRecheckApprovals") as HTMLButtonElement;
+const btnApproveAll = $("btnApproveAll") as HTMLButtonElement;
+const btnRefreshApprovals = $("btnRefreshApprovals") as HTMLButtonElement;
+const approvalSection = $("approvalSection") as HTMLDivElement;
+const approvalGrid = $("approvalGrid") as HTMLDivElement;
+const approvalSummary = $("approvalSummary") as HTMLSpanElement;
 
 const tokenIdEl = $("tokenId") as HTMLInputElement;
 const sideEl = $("side") as HTMLSelectElement;
@@ -63,6 +67,16 @@ let signerAddress: string | null = null;
 let apiCreds: ApiKeyCreds | null = null;
 let client: ClobClient | null = null;
 let lastVerify: { tickSize: TickSize; negRisk: boolean; minOrderSize?: number } | null = null;
+
+// Approval status tracking
+interface ApprovalStatus {
+  label: string;
+  type: "ERC20" | "ERC1155";
+  spender: string;
+  approved: boolean;
+}
+
+let currentApprovals: ApprovalStatus[] = [];
 
 function write(obj: unknown) {
   const msg = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
@@ -251,53 +265,148 @@ async function debugBalances(owner: string, negRisk: boolean) {
   });
 }
 
+// Check all 7 approvals in parallel and update UI
+async function checkAllApprovals(owner: string): Promise<ApprovalStatus[]> {
+  if (!signer) throw new Error("Connect MetaMask first.");
+
+  const usdc = new ethers.Contract(ADDRESSES.USDCe, ERC20_ABI, signer);
+  const ctf = new ethers.Contract(ADDRESSES.CTF, CTF_ERC1155_ABI, signer);
+
+  // Check all approvals in parallel
+  const [
+    allowanceCTF,
+    allowanceExchange,
+    allowanceNegExchange,
+    allowanceNegAdapter,
+    approvedExchange,
+    approvedNegExchange,
+    approvedNegAdapter,
+  ] = await Promise.all([
+    usdc.allowance(owner, ADDRESSES.CTF),
+    usdc.allowance(owner, ADDRESSES.CTF_EXCHANGE),
+    usdc.allowance(owner, ADDRESSES.NEG_RISK_CTF_EXCHANGE),
+    usdc.allowance(owner, ADDRESSES.NEG_RISK_ADAPTER),
+    ctf.isApprovedForAll(owner, ADDRESSES.CTF_EXCHANGE),
+    ctf.isApprovedForAll(owner, ADDRESSES.NEG_RISK_CTF_EXCHANGE),
+    ctf.isApprovedForAll(owner, ADDRESSES.NEG_RISK_ADAPTER),
+  ]);
+
+  const approvals: ApprovalStatus[] = [
+    { label: "USDC → CTF", type: "ERC20", spender: ADDRESSES.CTF, approved: allowanceCTF.gt(0) },
+    { label: "USDC → Exchange", type: "ERC20", spender: ADDRESSES.CTF_EXCHANGE, approved: allowanceExchange.gt(0) },
+    { label: "USDC → NegRisk Exchange", type: "ERC20", spender: ADDRESSES.NEG_RISK_CTF_EXCHANGE, approved: allowanceNegExchange.gt(0) },
+    { label: "USDC → NegRisk Adapter", type: "ERC20", spender: ADDRESSES.NEG_RISK_ADAPTER, approved: allowanceNegAdapter.gt(0) },
+    { label: "CTF → Exchange", type: "ERC1155", spender: ADDRESSES.CTF_EXCHANGE, approved: approvedExchange },
+    { label: "CTF → NegRisk Exchange", type: "ERC1155", spender: ADDRESSES.NEG_RISK_CTF_EXCHANGE, approved: approvedNegExchange },
+    { label: "CTF → NegRisk Adapter", type: "ERC1155", spender: ADDRESSES.NEG_RISK_ADAPTER, approved: approvedNegAdapter },
+  ];
+
+  currentApprovals = approvals;
+  return approvals;
+}
+
+// Render approval status in UI
+function renderApprovalStatus(approvals: ApprovalStatus[]) {
+  const approvedCount = approvals.filter(a => a.approved).length;
+  const total = approvals.length;
+  const allApproved = approvedCount === total;
+
+  approvalSection.style.display = "block";
+  approvalSummary.innerHTML = allApproved
+    ? '<span class="all-approved">All approved ✓</span>'
+    : `${approvedCount}/${total} approved`;
+
+  approvalGrid.innerHTML = approvals.map(a => `
+    <div class="approval-item ${a.approved ? 'approved' : 'pending'}">
+      <span class="approval-icon">${a.approved ? '✓' : '○'}</span>
+      <span class="approval-label">${a.label}</span>
+    </div>
+  `).join("");
+
+  const missingCount = approvals.filter(a => !a.approved).length;
+  btnApproveAll.disabled = missingCount === 0;
+  btnApproveAll.textContent = missingCount === 0
+    ? "All Approved ✓"
+    : `Approve All (${missingCount} remaining)`;
+}
+
+// Approve all missing approvals - sends all transactions, user confirms each in MetaMask
+async function approveAllMissing(owner: string): Promise<void> {
+  if (!signer) throw new Error("Connect MetaMask first.");
+
+  const missing = currentApprovals.filter(a => !a.approved);
+  if (missing.length === 0) {
+    setStatus("All approvals already set!", true);
+    return;
+  }
+
+  const usdc = new ethers.Contract(ADDRESSES.USDCe, ERC20_ABI, signer);
+  const ctf = new ethers.Contract(ADDRESSES.CTF, CTF_ERC1155_ABI, signer);
+
+  setStatus(`Sending ${missing.length} approval transactions... Confirm each in MetaMask`, true);
+  write({ approvingContracts: missing.map(m => m.label) });
+
+  // Send all transactions in parallel - user will see multiple MetaMask popups
+  const txPromises: Promise<ethers.ContractTransaction>[] = [];
+
+  for (const approval of missing) {
+    if (approval.type === "ERC20") {
+      txPromises.push(usdc.approve(approval.spender, ethers.constants.MaxUint256));
+    } else {
+      txPromises.push(ctf.setApprovalForAll(approval.spender, true));
+    }
+  }
+
+  try {
+    // Wait for all transactions to be sent (user confirms each)
+    const txs = await Promise.all(txPromises);
+
+    write({ transactionsSent: txs.map(tx => tx.hash) });
+    setStatus(`${txs.length} transactions sent! Waiting for confirmations...`, true);
+
+    // Wait for all to confirm
+    await Promise.all(txs.map(tx => tx.wait()));
+
+    setStatus("All approvals confirmed! ✓", true);
+    write({ allApprovalsConfirmed: true });
+
+    // Refresh status
+    const updated = await checkAllApprovals(owner);
+    renderApprovalStatus(updated);
+  } catch (e: any) {
+    // If user rejects one, others may still be pending
+    setStatus("Some approvals may have failed. Refreshing status...", false);
+    write({ approvalError: e.message });
+
+    // Refresh to see current state
+    const updated = await checkAllApprovals(owner);
+    renderApprovalStatus(updated);
+  }
+}
+
 btnClearCreds.onclick = () => clearCreds();
 
-// Recheck and display all approval statuses, with option to force re-approve
-btnRecheckApprovals.onclick = async () => {
+// Approve All button - sends all missing approvals at once
+btnApproveAll.onclick = async () => {
   try {
     if (!signer || !signerAddress) throw new Error("Connect MetaMask first.");
     await ensurePolygon();
+    await approveAllMissing(signerAddress);
+  } catch (e: any) {
+    setStatus(e.message || String(e), false);
+    write({ error: e.message || String(e) });
+  }
+};
 
-    const ctf = new ethers.Contract(ADDRESSES.CTF, CTF_ERC1155_ABI, signer);
-
-    // Check all ERC1155 approvals
-    const approvals = {
-      CTF_EXCHANGE: await ctf.isApprovedForAll(signerAddress, ADDRESSES.CTF_EXCHANGE),
-      NEG_RISK_CTF_EXCHANGE: await ctf.isApprovedForAll(signerAddress, ADDRESSES.NEG_RISK_CTF_EXCHANGE),
-      NEG_RISK_ADAPTER: await ctf.isApprovedForAll(signerAddress, ADDRESSES.NEG_RISK_ADAPTER),
-    };
-
-    write({
-      erc1155ApprovalsForSelling: {
-        owner: signerAddress,
-        CTF_EXCHANGE: { address: ADDRESSES.CTF_EXCHANGE, approved: approvals.CTF_EXCHANGE },
-        NEG_RISK_CTF_EXCHANGE: { address: ADDRESSES.NEG_RISK_CTF_EXCHANGE, approved: approvals.NEG_RISK_CTF_EXCHANGE },
-        NEG_RISK_ADAPTER: { address: ADDRESSES.NEG_RISK_ADAPTER, approved: approvals.NEG_RISK_ADAPTER },
-      },
-    });
-
-    // Check which ones are missing and offer to fix
-    const missing: string[] = [];
-    if (!approvals.CTF_EXCHANGE) missing.push("CTF_EXCHANGE");
-    if (!approvals.NEG_RISK_CTF_EXCHANGE) missing.push("NEG_RISK_CTF_EXCHANGE");
-    if (!approvals.NEG_RISK_ADAPTER) missing.push("NEG_RISK_ADAPTER");
-
-    if (missing.length > 0) {
-      setStatus(`Missing ERC1155 approvals: ${missing.join(", ")}. Setting them now...`, true);
-
-      for (const name of missing) {
-        const address = ADDRESSES[name as keyof typeof ADDRESSES];
-        setStatus(`Approving CTF → ${name}... Confirm in MetaMask`, true);
-        const tx = await ctf.setApprovalForAll(address, true);
-        write({ approval: `CTF setApprovalForAll (${name})`, txHash: tx.hash });
-        await tx.wait();
-      }
-
-      setStatus("All ERC1155 approvals set! Try selling again.", true);
-    } else {
-      setStatus("All ERC1155 approvals already set ✅", true);
-    }
+// Refresh approvals status
+btnRefreshApprovals.onclick = async () => {
+  try {
+    if (!signer || !signerAddress) throw new Error("Connect MetaMask first.");
+    await ensurePolygon();
+    setStatus("Checking approvals...", true);
+    const approvals = await checkAllApprovals(signerAddress);
+    renderApprovalStatus(approvals);
+    setStatus("Approval status refreshed", true);
   } catch (e: any) {
     setStatus(e.message || String(e), false);
     write({ error: e.message || String(e) });
@@ -333,12 +442,23 @@ btnConnect.onclick = async () => {
     btnDerive.disabled = false;
     btnVerify.disabled = false;
     btnPlace.disabled = true;
-    btnRecheckApprovals.disabled = false;
 
     write({ connected: true, address: signerAddress, chainId: CHAIN_ID });
     // Sync state to shared module
     updateState({ provider, signer, signerAddress, apiCreds });
-    // we don't know negRisk yet; log basic balance
+
+    // Auto-check all approvals on connect
+    setStatus("Checking contract approvals...", true);
+    const approvals = await checkAllApprovals(signerAddress);
+    renderApprovalStatus(approvals);
+
+    const approvedCount = approvals.filter(a => a.approved).length;
+    setStatus(
+      `Connected: ${signerAddress.slice(0, 6)}...${signerAddress.slice(-4)} | Approvals: ${approvedCount}/${approvals.length}`,
+      true
+    );
+
+    // Log basic balance
     await debugBalances(signerAddress, false);
   } catch (e: any) {
     setStatus(e.message || String(e), false);

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Polymarket Trading</title>
+  <link rel="stylesheet" href="/src/trade/trade.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">Polymarket Trading</h1>
+        <nav class="nav">
+          <a href="/trade.html" class="nav-link active">Markets</a>
+          <a href="/trade.html#positions" class="nav-link">Positions</a>
+          <a href="/trade.html#orders" class="nav-link">Orders</a>
+          <a href="/index.html" class="nav-link">Advanced</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <div id="walletBalance" class="wallet-balance"></div>
+        <button id="btnConnectWallet" class="btn-connect">Connect Wallet</button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Sidebar Filters -->
+      <aside class="sidebar">
+        <div class="filter-section">
+          <h3>Filters</h3>
+          <div class="filter-group">
+            <label>Sort By</label>
+            <select id="sortBy">
+              <option value="volume24hr">24h Volume</option>
+              <option value="liquidity">Liquidity</option>
+              <option value="volume">Total Volume</option>
+              <option value="newest">Newest</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Min Liquidity</label>
+            <input type="number" id="minLiquidity" placeholder="0" value="1000" />
+          </div>
+          <div class="filter-group">
+            <label>Search</label>
+            <input type="text" id="searchMarkets" placeholder="Search markets..." />
+          </div>
+        </div>
+        <div class="stats-section">
+          <h3>Your Stats</h3>
+          <div id="userStats" class="user-stats">
+            <p class="stat-item">
+              <span class="stat-label">USDC Balance:</span>
+              <span id="usdcBalance" class="stat-value">--</span>
+            </p>
+            <p class="stat-item">
+              <span class="stat-label">Open Orders:</span>
+              <span id="openOrdersCount" class="stat-value">--</span>
+            </p>
+            <p class="stat-item">
+              <span class="stat-label">Positions:</span>
+              <span id="positionsCount" class="stat-value">--</span>
+            </p>
+          </div>
+        </div>
+        <div class="refresh-section">
+          <button id="btnRefreshMarkets" class="btn-refresh">Refresh Markets</button>
+          <div class="auto-refresh">
+            <input type="checkbox" id="autoRefresh" checked />
+            <label for="autoRefresh">Auto-refresh (10s)</label>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Content Area with Tabs -->
+      <section class="content-section">
+        <!-- Tabs -->
+        <div class="content-tabs">
+          <button class="content-tab active" data-tab="markets">Live Markets</button>
+          <button class="content-tab" data-tab="positions">My Positions</button>
+          <button class="content-tab" data-tab="orders">Open Orders</button>
+        </div>
+
+        <!-- Markets Tab -->
+        <div id="marketsTab" class="tab-panel active" data-panel="markets">
+          <div class="panel-header">
+            <h2>Live Markets</h2>
+            <span id="marketCount" class="count-badge">Loading...</span>
+          </div>
+          <div id="marketsGrid" class="markets-grid">
+            <div class="loading">Loading markets...</div>
+          </div>
+        </div>
+
+        <!-- Positions Tab -->
+        <div id="positionsTab" class="tab-panel" data-panel="positions">
+          <div class="panel-header">
+            <h2>My Positions</h2>
+            <div class="panel-actions">
+              <span id="positionsTotalValue" class="total-value"></span>
+              <button id="btnRefreshPositions" class="btn-small">Refresh</button>
+            </div>
+          </div>
+          <div id="positionsGrid" class="positions-grid">
+            <div class="empty-state">Connect wallet to view positions</div>
+          </div>
+        </div>
+
+        <!-- Orders Tab -->
+        <div id="ordersTab" class="tab-panel" data-panel="orders">
+          <div class="panel-header">
+            <h2>Open Orders</h2>
+            <div class="panel-actions">
+              <button id="btnRefreshOrders" class="btn-small">Refresh</button>
+              <button id="btnCancelAllOrders" class="btn-small danger">Cancel All</button>
+            </div>
+          </div>
+          <div id="ordersGrid" class="orders-grid">
+            <div class="empty-state">Connect wallet to view orders</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Trading Modal -->
+    <div id="tradeModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="modalMarketTitle">Market Title</h2>
+          <button id="btnCloseModal" class="btn-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <!-- Market Info -->
+          <div class="market-info">
+            <img id="modalMarketImage" src="" alt="" class="modal-image" />
+            <p id="modalMarketDescription" class="modal-description"></p>
+          </div>
+
+          <!-- Outcome Selection -->
+          <div class="outcome-selection">
+            <h3>Select Outcome</h3>
+            <div id="outcomeButtons" class="outcome-buttons"></div>
+          </div>
+
+          <!-- Order Book Preview -->
+          <div class="orderbook-preview">
+            <div class="orderbook-side">
+              <h4>Best Bid</h4>
+              <span id="bestBid" class="price bid">--</span>
+            </div>
+            <div class="orderbook-side">
+              <h4>Best Ask</h4>
+              <span id="bestAsk" class="price ask">--</span>
+            </div>
+            <div class="orderbook-side">
+              <h4>Spread</h4>
+              <span id="spread" class="price">--</span>
+            </div>
+          </div>
+
+          <!-- Trade Form -->
+          <div class="trade-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Side</label>
+                <div class="side-buttons">
+                  <button id="btnBuy" class="btn-side buy active">BUY</button>
+                  <button id="btnSell" class="btn-side sell">SELL</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Price</label>
+                <input type="number" id="tradePrice" step="0.001" placeholder="0.50" />
+                <div class="price-shortcuts">
+                  <button class="btn-price" data-price="bid">Bid</button>
+                  <button class="btn-price" data-price="mid">Mid</button>
+                  <button class="btn-price" data-price="ask">Ask</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Shares</label>
+                <input type="number" id="tradeSize" step="1" placeholder="10" />
+                <div class="size-shortcuts">
+                  <button class="btn-size" data-pct="25">25%</button>
+                  <button class="btn-size" data-pct="50">50%</button>
+                  <button class="btn-size" data-pct="100">Max</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Cost Calculator -->
+            <div class="cost-calculator">
+              <div class="calc-row">
+                <span>Cost:</span>
+                <span id="totalCost">$0.00</span>
+              </div>
+              <div class="calc-row">
+                <span>Potential Payout:</span>
+                <span id="potentialPayout">$0.00</span>
+              </div>
+              <div class="calc-row highlight">
+                <span>Potential Profit:</span>
+                <span id="potentialProfit">$0.00</span>
+              </div>
+              <div class="calc-row info">
+                <span>Min Order Size:</span>
+                <span id="minOrderSize">--</span>
+              </div>
+            </div>
+
+            <!-- Warnings -->
+            <div id="tradeWarnings" class="trade-warnings hidden"></div>
+
+            <!-- Submit Button -->
+            <button id="btnSubmitTrade" class="btn-submit" disabled>
+              Connect Wallet to Trade
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/trade/index.ts"></script>
+</body>
+</html>
