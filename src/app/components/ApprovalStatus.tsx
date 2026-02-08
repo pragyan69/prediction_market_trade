@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useWallet } from '../contexts/WalletContext';
+import { useSafe } from '../contexts/SafeContext';
 
 export function ApprovalStatus() {
-  const { approvals, isCheckingApprovals, isApproving, checkApprovals, approveAll, allApproved } = useWallet();
+  const { approvals, isCheckingApprovals, isApproving, checkApprovals, approveAll, allApproved } = useSafe();
   const [isExpanded, setIsExpanded] = useState(false);
 
   const approvedCount = approvals.filter(a => a.approved).length;

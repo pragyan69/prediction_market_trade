@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useWallet } from '../contexts/WalletContext';
+import { useSafe } from '../contexts/SafeContext';
 import { useTrading } from '../contexts/TradingContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import type { Market } from './MarketsView';
@@ -17,7 +18,8 @@ interface OrderBookLevel {
 }
 
 export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
-  const { isConnected, connect, usdcBalance, allApproved, approveAll, isApproving } = useWallet();
+  const { isConnected, connect } = useWallet();
+  const { safeUsdceBalance, refreshSafeBalance, isSafeDeployed } = useSafe();
   const { placeOrder, getOrderBook, isInitialized, isDerivingCreds } = useTrading();
   const { subscribeToAsset, onMessage } = useWebSocket();
 
@@ -27,6 +29,13 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
   const [amount, setAmount] = useState(String(market.minSize || 10));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderBook, setOrderBook] = useState<{ bids: OrderBookLevel[]; asks: OrderBookLevel[] }>({ bids: [], asks: [] });
+
+  // Refresh balances when modal opens
+  useEffect(() => {
+    if (isConnected) {
+      refreshSafeBalance();
+    }
+  }, [isConnected, refreshSafeBalance]);
 
   // Fetch initial order book
   useEffect(() => {
@@ -75,15 +84,9 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
   const profitPct = totalCost > 0 ? (potentialProfit / totalCost) * 100 : 0;
 
   // Validation
-  const warnings: string[] = [];
-  if (amountNum < market.minSize) {
-    warnings.push(`Min order size: ${market.minSize} shares`);
-  }
-  if (side === 'BUY' && totalCost > usdcBalance) {
-    warnings.push(`Insufficient balance ($${usdcBalance.toFixed(2)} available)`);
-  }
-
-  const canSubmit = isConnected && isInitialized && warnings.length === 0 && priceNum > 0 && amountNum > 0;
+  const insufficientBalance = side === 'BUY' && totalCost > safeUsdceBalance;
+  const belowMinSize = amountNum < market.minSize;
+  const canSubmit = isConnected && isInitialized && !insufficientBalance && !belowMinSize && priceNum > 0 && amountNum > 0;
 
   // Submit trade
   const handleSubmit = async () => {
@@ -92,12 +95,6 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
     setIsSubmitting(true);
 
     try {
-      // Ensure approvals first
-      if (!allApproved) {
-        showToast('Setting up approvals...', 'success');
-        await approveAll();
-      }
-
       const result = await placeOrder({
         tokenId: market.clobTokenIds[selectedOutcome],
         price: priceNum,
@@ -107,7 +104,7 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
         tickSize: String(market.tickSize),
       });
 
-      showToast(`Order submitted! ID: ${result.orderID}`, 'success');
+      showToast(`Order placed! ID: ${result.orderID}`, 'success');
       onClose();
     } catch (error: any) {
       console.error('Trade failed:', error);
@@ -128,7 +125,7 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
 
   // Quick amount buttons
   const setAmountPct = (pct: number) => {
-    const maxShares = Math.floor(usdcBalance / priceNum);
+    const maxShares = Math.floor(safeUsdceBalance / priceNum);
     setAmount(String(Math.floor(maxShares * (pct / 100))));
   };
 
@@ -274,6 +271,10 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
             {/* Cost Summary */}
             <div className="cost-summary">
               <div className="cost-row">
+                <span>Safe Balance</span>
+                <span>${safeUsdceBalance.toFixed(2)} USDC.e</span>
+              </div>
+              <div className="cost-row">
                 <span>Total Cost</span>
                 <span>${totalCost.toFixed(2)}</span>
               </div>
@@ -288,23 +289,21 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
             </div>
 
             {/* Warnings */}
-            {warnings.length > 0 && (
+            {insufficientBalance && (
               <div className="trade-warning">
-                {warnings.join('. ')}
+                Insufficient balance (${safeUsdceBalance.toFixed(2)} available in Safe)
               </div>
             )}
 
-            {/* Approval Status */}
-            {isConnected && !allApproved && (
-              <div className="approval-notice">
-                <span>Contract approvals needed before trading</span>
-                <button
-                  className="btn-secondary"
-                  onClick={approveAll}
-                  disabled={isApproving}
-                >
-                  {isApproving ? 'Approving...' : 'Set Up Approvals'}
-                </button>
+            {belowMinSize && (
+              <div className="trade-warning">
+                Min order size: {market.minSize} shares
+              </div>
+            )}
+
+            {!isSafeDeployed && isConnected && (
+              <div className="trade-info">
+                Safe will be deployed automatically (gasless)
               </div>
             )}
 

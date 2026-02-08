@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '../contexts/WalletContext';
+import { useSafe } from '../contexts/SafeContext';
 
 const DATA_API = 'https://data-api.polymarket.com';
 
@@ -20,19 +21,20 @@ interface PortfolioViewProps {
 }
 
 export function PortfolioView({ showToast }: PortfolioViewProps) {
-  const { isConnected, address, refreshBalance } = useWallet();
+  const { isConnected } = useWallet();
+  const { safeAddress, refreshSafeBalance } = useSafe();
 
   const [positions, setPositions] = useState<Position[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchPositions = useCallback(async () => {
-    if (!address) return;
+    if (!safeAddress) return;
 
     setIsLoading(true);
 
     try {
       const response = await fetch(
-        `${DATA_API}/positions?user=${address.toLowerCase()}&sizeThreshold=1&limit=100`
+        `${DATA_API}/positions?user=${safeAddress.toLowerCase()}&sizeThreshold=1&limit=100`
       );
       const data = await response.json();
 
@@ -53,13 +55,13 @@ export function PortfolioView({ showToast }: PortfolioViewProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [address, showToast]);
+  }, [safeAddress, showToast]);
 
   useEffect(() => {
-    if (isConnected && address) {
+    if (isConnected && safeAddress) {
       fetchPositions();
     }
-  }, [isConnected, address, fetchPositions]);
+  }, [isConnected, safeAddress, fetchPositions]);
 
   // Calculate totals
   const portfolioValue = positions.reduce((sum, p) => sum + (p.size * p.currentPrice), 0);

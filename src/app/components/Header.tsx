@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useWallet } from '../contexts/WalletContext';
+import { useSafe } from '../contexts/SafeContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { WalletModal } from './WalletModal';
 
@@ -9,23 +10,10 @@ interface HeaderProps {
 }
 
 export function Header({ currentView, onViewChange }: HeaderProps) {
-  const {
-    isConnected,
-    isInitializing,
-    address,
-    usdcBalance,
-    connect,
-    walletIcon,
-    userName,
-    walletType,
-    allApproved,
-    approvals,
-  } = useWallet();
+  const { isConnected, isInitializing, address, connect, walletIcon, userName, walletType } = useWallet();
+  const { safeUsdceBalance, isSafeDeployed } = useSafe();
   const { isConnected: wsConnected } = useWebSocket();
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
-
-  const approvedCount = approvals.filter(a => a.approved).length;
-  const totalApprovals = approvals.length;
 
   const getWalletIconEmoji = () => {
     switch (walletIcon) {
@@ -88,40 +76,29 @@ export function Header({ currentView, onViewChange }: HeaderProps) {
       <div className="header-right">
         <div className="connection-status">
           <span className={`ws-indicator ${wsConnected ? 'connected' : 'disconnected'}`}></span>
-          <span>{wsConnected ? 'Live' : 'Disconnected'}</span>
+          <span>{wsConnected ? 'Live' : 'Offline'}</span>
         </div>
 
         {isConnected && (
           <>
             <div className="balance-display">
-              <span className="balance-amount">{formatBalance(usdcBalance)}</span>
-              <span className="balance-label">USDC</span>
+              <span className="balance-amount">{formatBalance(safeUsdceBalance)}</span>
+              <span className="balance-label">USDC.e</span>
             </div>
 
-            {/* Wallet Info Card */}
             <div className="wallet-info">
               <div className="wallet-type-badge">
-                {walletType === 'embedded' ? 'Privy Wallet' : 'External Wallet'}
+                {isSafeDeployed ? 'Safe' : 'Pending'}
               </div>
-              {address && (
-                <div className="wallet-address">
-                  {address.slice(0, 6)}...{address.slice(-4)}
-                </div>
-              )}
             </div>
           </>
         )}
 
         {isConnected ? (
-          <div className="wallet-connected">
-            <button className="btn-connect connected" onClick={() => setIsWalletModalOpen(true)}>
-              <span className="btn-icon">{getWalletIconEmoji()}</span>
-              <span className="btn-text">{getDisplayName()}</span>
-              {!allApproved && totalApprovals > 0 && (
-                <span className="approval-badge">{totalApprovals - approvedCount}</span>
-              )}
-            </button>
-          </div>
+          <button className="btn-connect connected" onClick={() => setIsWalletModalOpen(true)}>
+            <span className="btn-icon">{getWalletIconEmoji()}</span>
+            <span className="btn-text">{getDisplayName()}</span>
+          </button>
         ) : (
           <button className="btn-connect" onClick={connect} disabled={isInitializing}>
             <span className="btn-icon">⬡</span>

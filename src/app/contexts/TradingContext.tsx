@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, type React
 import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
 import type { ApiKeyCreds, TickSize } from '@polymarket/clob-client';
 import { useWallet } from './WalletContext';
+import { useSafe } from './SafeContext';
 
 const HOST = 'https://clob.polymarket.com';
 const CHAIN_ID = 137;
@@ -42,16 +43,18 @@ export function useTrading() {
 }
 
 export function TradingProvider({ children }: { children: ReactNode }) {
-  const { signer, address, isConnected, approveAll, allApproved } = useWallet();
+  const { signer, address } = useWallet();
+  const { safeAddress, isSafeDeployed, deploySafe, approveAll, allApproved } = useSafe();
 
   const [client, setClient] = useState<ClobClient | null>(null);
   const [apiCreds, setApiCreds] = useState<ApiKeyCreds | null>(null);
   const [isDerivingCreds, setIsDerivingCreds] = useState(false);
 
   // Initialize CLOB client when wallet connects
+  // The client uses EOA signer but trades execute from Safe address
   useEffect(() => {
     async function initClient() {
-      if (!signer || !address) {
+      if (!signer || !address || !safeAddress) {
         setClient(null);
         setApiCreds(null);
         return;
@@ -60,8 +63,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setIsDerivingCreds(true);
 
       try {
-        // Check for stored credentials
-        const stored = localStorage.getItem('POLY_USER_API_CREDS');
+        // Check for stored credentials (keyed by EOA address)
+        const storageKey = `POLY_API_CREDS_${address}`;
+        const stored = localStorage.getItem(storageKey);
         let creds: ApiKeyCreds | null = null;
 
         if (stored) {
@@ -69,13 +73,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             const parsed = JSON.parse(stored);
             if (parsed?.key && parsed?.secret && parsed?.passphrase) {
               creds = parsed;
+              console.log('[Trading] Using stored API credentials');
             }
           } catch {}
         }
 
         if (!creds) {
           // Derive new credentials (requires signing a message)
-          console.log('Deriving API credentials...');
+          console.log('[Trading] Deriving API credentials...');
           const temp = new ClobClient(HOST, CHAIN_ID, signer as any);
           const derived: any = await temp.createOrDeriveApiKey();
 
@@ -85,22 +90,35 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             passphrase: derived.passphrase,
           };
 
-          localStorage.setItem('POLY_USER_API_CREDS', JSON.stringify(creds));
-          console.log('API credentials derived and saved');
+          localStorage.setItem(storageKey, JSON.stringify(creds));
+          console.log('[Trading] API credentials derived and saved');
         }
 
         setApiCreds(creds);
-        setClient(new ClobClient(HOST, CHAIN_ID, signer as any, creds, 0, address));
+
+        // Create client with Safe address as the proxy address
+        // Orders are signed by EOA but execute from Safe
+        const clobClient = new ClobClient(
+          HOST,
+          CHAIN_ID,
+          signer as any,
+          creds,
+          0, // feeRateBps
+          safeAddress // proxy address (Safe wallet)
+        );
+
+        setClient(clobClient);
+        console.log('[Trading] CLOB client initialized with Safe:', safeAddress);
 
       } catch (error) {
-        console.error('Failed to initialize trading client:', error);
+        console.error('[Trading] Failed to initialize client:', error);
       } finally {
         setIsDerivingCreds(false);
       }
     }
 
     initClient();
-  }, [signer, address]);
+  }, [signer, address, safeAddress]);
 
   // Place order
   const placeOrder = useCallback(async (params: {
@@ -115,10 +133,19 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       throw new Error('Trading client not initialized');
     }
 
-    // Ensure approvals before trading
+    // Deploy Safe if needed (gasless)
+    if (!isSafeDeployed) {
+      console.log('[Trading] Deploying Safe before trading...');
+      await deploySafe();
+    }
+
+    // Ensure approvals before trading (gasless)
     if (!allApproved) {
+      console.log('[Trading] Setting approvals before trading...');
       await approveAll();
     }
+
+    console.log('[Trading] Placing order...', params);
 
     const response = await client.createAndPostOrder(
       {
@@ -134,11 +161,13 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       OrderType.GTC
     );
 
+    console.log('[Trading] Order placed:', response);
+
     return {
       orderID: response.orderID || '',
       status: response.status || 'unknown',
     };
-  }, [client, allApproved, approveAll]);
+  }, [client, isSafeDeployed, deploySafe, allApproved, approveAll]);
 
   // Get open orders
   const getOpenOrders = useCallback(async () => {
@@ -146,7 +175,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     try {
       return await client.getOpenOrders();
     } catch (error) {
-      console.error('Failed to get open orders:', error);
+      console.error('[Trading] Failed to get open orders:', error);
       return [];
     }
   }, [client]);
@@ -166,7 +195,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   // Get order book
   const getOrderBook = useCallback(async (tokenId: string) => {
     if (!client) {
-      // Use public endpoint
       const response = await fetch(`${HOST}/book?token_id=${tokenId}`);
       return await response.json();
     }

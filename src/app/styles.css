@@ -701,13 +701,16 @@ body {
 }
 
 .modal-overlay {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
+  width: 100vw;
+  height: 100vh;
   background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(4px);
+  z-index: 1000;
 }
 
 .modal-container {
@@ -1375,12 +1378,14 @@ body {
   transform: translate(-50%, -50%);
   width: 90%;
   max-width: 420px;
+  max-height: 85vh;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   z-index: 1001;
-  overflow: hidden;
+  overflow-y: auto;
+  margin: 0;
 }
 
 .wallet-modal-header {
@@ -1639,6 +1644,66 @@ body {
   background: var(--red-bg);
 }
 
+/* Deploy Safe Button */
+.btn-deploy-safe {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, var(--accent), #8b5cf6);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 16px;
+}
+
+.btn-deploy-safe:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.btn-deploy-safe:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Deposit Address */
+.deposit-address {
+  font-family: monospace;
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+/* Approval Warning */
+.approval-warning {
+  background: var(--red-bg);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 13px;
+  color: var(--red);
+  text-align: center;
+}
+
+/* Trade Info */
+.trade-info {
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--accent);
+  text-align: center;
+  margin-bottom: 12px;
+}
+
 /* Approvals Tab */
 .approvals-section {
   display: flex;
@@ -1742,4 +1807,644 @@ body {
 .btn-refresh-approvals:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* ============================================
+   NEW: Wallet Balance Section Styles
+   ============================================ */
+
+.wallet-balances-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.wallet-balances-section .balance-card {
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+.wallet-balances-section .balance-card.primary {
+  border-color: var(--green);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.05) 0%, var(--bg-tertiary) 100%);
+}
+
+.wallet-balances-section .balance-card.warning {
+  border-color: var(--red);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, var(--bg-tertiary) 100%);
+}
+
+.wallet-balances-section .balance-card.small {
+  padding: 12px 16px;
+}
+
+.wallet-balances-section .balance-card.small .balance-value {
+  font-size: 16px;
+}
+
+.token-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--green);
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.token-badge.warning {
+  background: var(--yellow);
+  color: #000;
+}
+
+.balance-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Swap Notice */
+.swap-notice {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius-md);
+  margin-bottom: 20px;
+}
+
+.swap-notice-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.swap-notice-text strong {
+  display: block;
+  color: var(--yellow);
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.swap-notice-text p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Balance secondary in header */
+.balance-secondary {
+  opacity: 0.7;
+}
+
+.balance-secondary .balance-label {
+  font-size: 10px;
+}
+
+/* ============================================
+   RESPONSIVE STYLES
+   ============================================ */
+
+/* Tablet */
+@media (max-width: 1024px) {
+  .header {
+    padding: 12px 16px;
+  }
+
+  .header-left {
+    gap: 20px;
+  }
+
+  .logo-text {
+    display: none;
+  }
+
+  .nav {
+    gap: 4px;
+  }
+
+  .nav-link {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .header-right {
+    gap: 12px;
+  }
+
+  .wallet-info {
+    display: none;
+  }
+
+  .balance-display {
+    padding: 6px 10px;
+  }
+
+  .markets-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .market-card {
+    padding: 16px;
+  }
+
+  .modal-container {
+    width: 95%;
+    max-width: none;
+    margin: 10px;
+  }
+
+  .modal-body {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .trade-section {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .header {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 12px;
+  }
+
+  .header-left {
+    flex: 1;
+    min-width: 100%;
+    justify-content: space-between;
+  }
+
+  .logo {
+    font-size: 16px;
+  }
+
+  .logo-icon {
+    font-size: 20px;
+  }
+
+  .logo-text {
+    display: inline;
+  }
+
+  .nav {
+    display: flex;
+    gap: 2px;
+  }
+
+  .nav-link {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .header-right {
+    flex: 1;
+    min-width: 100%;
+    justify-content: space-between;
+  }
+
+  .connection-status {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  .balance-display {
+    padding: 6px 10px;
+  }
+
+  .balance-amount {
+    font-size: 13px;
+  }
+
+  .balance-label {
+    font-size: 9px;
+  }
+
+  .btn-connect {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .btn-icon {
+    font-size: 14px;
+  }
+
+  /* Markets */
+  .markets-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .search-box {
+    width: 100%;
+  }
+
+  .filter-pills {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .filter-pill {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .markets-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .market-card {
+    padding: 14px;
+  }
+
+  .market-title {
+    font-size: 13px;
+    -webkit-line-clamp: 2;
+  }
+
+  .market-prices {
+    gap: 8px;
+  }
+
+  .price-btn {
+    padding: 10px 8px;
+    font-size: 12px;
+  }
+
+  .market-meta {
+    font-size: 10px;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    padding: 0;
+  }
+
+  .modal-container {
+    width: 100%;
+    height: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    margin: 0;
+  }
+
+  .modal-header {
+    padding: 14px;
+  }
+
+  .modal-title-section {
+    gap: 10px;
+  }
+
+  .modal-image {
+    width: 48px;
+    height: 48px;
+  }
+
+  .modal-title {
+    font-size: 14px;
+  }
+
+  .modal-meta {
+    font-size: 11px;
+  }
+
+  .modal-body {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .orderbook-section {
+    order: 2;
+  }
+
+  .outcome-section {
+    gap: 8px;
+  }
+
+  .outcome-btn {
+    padding: 12px;
+  }
+
+  .outcome-price {
+    font-size: 20px;
+  }
+
+  .side-toggle {
+    margin-bottom: 12px;
+  }
+
+  .side-btn {
+    padding: 10px;
+    font-size: 13px;
+  }
+
+  .input-group label {
+    font-size: 11px;
+  }
+
+  .input-with-btns input {
+    padding: 10px;
+    font-size: 14px;
+  }
+
+  .quick-btns {
+    gap: 2px;
+  }
+
+  .quick-btn {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+
+  .cost-summary {
+    padding: 12px;
+  }
+
+  .cost-row {
+    font-size: 12px;
+    padding: 6px 0;
+  }
+
+  .btn-trade {
+    padding: 14px;
+    font-size: 14px;
+  }
+
+  /* Wallet Modal */
+  .wallet-modal {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    top: 0;
+    left: 0;
+    transform: none;
+  }
+
+  .wallet-modal-header {
+    padding: 16px;
+  }
+
+  .wallet-modal-content {
+    padding: 16px;
+  }
+
+  .wallet-user-info {
+    margin-bottom: 20px;
+  }
+
+  .wallet-avatar {
+    width: 48px;
+    height: 48px;
+    font-size: 24px;
+  }
+
+  .wallet-address-text {
+    font-size: 11px;
+  }
+
+  .wallet-actions {
+    grid-template-columns: 1fr;
+  }
+
+  /* Portfolio */
+  .portfolio-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .portfolio-stats {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 12px;
+  }
+
+  .positions-table {
+    font-size: 12px;
+  }
+
+  .positions-table th,
+  .positions-table td {
+    padding: 10px 8px;
+  }
+
+  /* Orders */
+  .orders-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .orders-table {
+    font-size: 11px;
+  }
+
+  .orders-table th,
+  .orders-table td {
+    padding: 8px 6px;
+  }
+
+  .btn-cancel {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+
+  /* Toast */
+  .toast-container {
+    bottom: 12px;
+    right: 12px;
+    left: 12px;
+  }
+
+  .toast {
+    padding: 10px 14px;
+  }
+}
+
+/* Small Mobile */
+@media (max-width: 400px) {
+  .header-left {
+    gap: 8px;
+  }
+
+  .nav-link {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .balance-display {
+    padding: 4px 8px;
+  }
+
+  .balance-amount {
+    font-size: 12px;
+  }
+
+  .btn-connect {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  .market-card {
+    padding: 12px;
+  }
+
+  .market-title {
+    font-size: 12px;
+  }
+
+  .price-btn {
+    padding: 8px 6px;
+    font-size: 11px;
+  }
+}
+
+/* Hide/show elements based on screen size */
+@media (max-width: 600px) {
+  .balance-secondary {
+    display: none;
+  }
+
+  .approval-badge {
+    display: none;
+  }
+}
+
+/* ============================================
+   Trade Modal Balance & Gas Warning
+   ============================================ */
+
+.trade-balance-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+
+.trade-balance-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.trade-balance-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.trade-balance-value.warning {
+  color: var(--red);
+}
+
+.gas-warning {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+}
+
+.gas-warning-text {
+  flex: 1;
+}
+
+.gas-warning-text strong {
+  display: block;
+  color: var(--red);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.gas-warning-text p {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.btn-fund-gas {
+  padding: 8px 16px;
+  background: var(--red);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.btn-fund-gas:hover {
+  background: #dc2626;
+}
+
+/* Gas Badge in Header */
+.gas-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  cursor: help;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Deposit Info */
+.deposit-info {
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+
+.deposit-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.deposit-text strong {
+  color: var(--text-primary);
 }

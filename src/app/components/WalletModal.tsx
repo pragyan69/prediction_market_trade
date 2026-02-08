@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useWallet } from '../contexts/WalletContext';
-import { ApprovalStatus } from './ApprovalStatus';
+import { useSafe } from '../contexts/SafeContext';
 
 interface WalletModalProps {
   isOpen: boolean;
@@ -11,34 +11,40 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
   const {
     address,
     userName,
-    userEmail,
     walletType,
     walletIcon,
     loginMethod,
-    usdcBalance,
-    maticBalance,
-    refreshBalance,
     disconnect,
-    openFundWallet,
+    eoaUsdceBalance,
+    eoaMaticBalance,
+    refreshEoaBalance,
+  } = useWallet();
+
+  const {
+    safeAddress,
+    isSafeDeployed,
+    isDeployingSafe,
+    deploySafe,
+    safeUsdceBalance,
+    safeMaticBalance,
+    refreshSafeBalance,
     approvals,
     isCheckingApprovals,
     isApproving,
     checkApprovals,
     approveAll,
     allApproved,
-  } = useWallet();
+  } = useSafe();
 
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'wallet' | 'approvals'>('wallet');
 
   if (!isOpen) return null;
 
-  const copyAddress = async () => {
-    if (address) {
-      await navigator.clipboard.writeText(address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+  const copyAddress = async (addr: string) => {
+    await navigator.clipboard.writeText(addr);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const formatBalance = (balance: number, decimals = 2) => {
@@ -110,47 +116,112 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
               </div>
             </div>
 
-            {/* Address */}
+            {/* EOA Wallet (where your funds currently are) */}
             <div className="wallet-address-section">
-              <label>Wallet Address</label>
+              <label>EOA Wallet (Your Privy Wallet)</label>
               <div className="wallet-address-row">
-                <span className="wallet-address-text">{address}</span>
-                <button className="btn-copy" onClick={copyAddress}>
+                <span className="wallet-address-text">
+                  {address ? `${address.slice(0, 10)}...${address.slice(-8)}` : 'Not connected'}
+                </span>
+                <button className="btn-copy" onClick={() => address && copyAddress(address)}>
                   {copied ? '✓ Copied' : 'Copy'}
                 </button>
               </div>
-              <div className="wallet-type-badge-large">
-                {walletType === 'embedded' ? 'Privy Embedded Wallet' : 'External Wallet'}
-              </div>
             </div>
 
-            {/* Balances */}
+            {/* EOA Balances */}
             <div className="wallet-balances">
               <div className="balance-card">
                 <div className="balance-token">
                   <span className="token-icon">💵</span>
-                  <span className="token-name">USDC</span>
+                  <span className="token-name">USDC.e (EOA)</span>
                 </div>
-                <div className="balance-value">${formatBalance(usdcBalance)}</div>
+                <div className="balance-value">${formatBalance(eoaUsdceBalance)}</div>
               </div>
               <div className="balance-card">
                 <div className="balance-token">
                   <span className="token-icon">💎</span>
-                  <span className="token-name">MATIC</span>
+                  <span className="token-name">POL (EOA)</span>
                 </div>
-                <div className="balance-value">{formatBalance(maticBalance, 4)}</div>
+                <div className="balance-value">{formatBalance(eoaMaticBalance, 4)}</div>
+              </div>
+            </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '16px 0' }} />
+
+            {/* Safe Wallet (for trading) */}
+            <div className="wallet-address-section">
+              <label>Safe Wallet (Trading)</label>
+              <div className="wallet-address-row">
+                <span className="wallet-address-text">
+                  {safeAddress ? `${safeAddress.slice(0, 10)}...${safeAddress.slice(-8)}` : 'Deriving...'}
+                </span>
+                <button className="btn-copy" onClick={() => safeAddress && copyAddress(safeAddress)}>
+                  {copied ? '✓ Copied' : 'Copy'}
+                </button>
+              </div>
+              <div className="wallet-type-badge-large">
+                {isSafeDeployed ? '✓ Safe Deployed' : 'Safe Not Deployed'}
+              </div>
+            </div>
+
+            {/* Deploy Safe Button if not deployed */}
+            {!isSafeDeployed && safeAddress && (
+              <button
+                className="btn-deploy-safe"
+                onClick={deploySafe}
+                disabled={isDeployingSafe}
+              >
+                {isDeployingSafe ? 'Deploying Safe...' : 'Deploy Safe (Gasless)'}
+              </button>
+            )}
+
+            {/* Safe Balances */}
+            <div className="wallet-balances">
+              <div className="balance-card">
+                <div className="balance-token">
+                  <span className="token-icon">💵</span>
+                  <span className="token-name">USDC.e (Safe)</span>
+                </div>
+                <div className="balance-value">${formatBalance(safeUsdceBalance)}</div>
+              </div>
+              <div className="balance-card">
+                <div className="balance-token">
+                  <span className="token-icon">💎</span>
+                  <span className="token-name">POL (Safe)</span>
+                </div>
+                <div className="balance-value">{formatBalance(safeMaticBalance, 4)}</div>
+              </div>
+            </div>
+
+            {/* Transfer Instructions */}
+            {eoaUsdceBalance > 0 && safeUsdceBalance === 0 && (
+              <div className="deposit-info" style={{ background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)' }}>
+                <p className="deposit-text" style={{ color: 'var(--yellow)' }}>
+                  Your USDC.e is in your EOA. Transfer it to your Safe to trade.
+                </p>
+              </div>
+            )}
+
+            {/* Deposit Info */}
+            <div className="deposit-info">
+              <p className="deposit-text">
+                Send <strong>USDC.e</strong> to your Safe address on <strong>Polygon</strong> to trade:
+              </p>
+              <div className="deposit-address">
+                {safeAddress || 'Loading...'}
               </div>
             </div>
 
             {/* Actions */}
             <div className="wallet-actions">
-              <button className="btn-deposit" onClick={openFundWallet}>
-                <span>💰</span>
-                Deposit
+              <button className="btn-deposit" onClick={() => safeAddress && copyAddress(safeAddress)}>
+                <span>📋</span>
+                {copied ? 'Copied!' : 'Copy Safe Address'}
               </button>
-              <button className="btn-refresh" onClick={refreshBalance}>
+              <button className="btn-refresh" onClick={() => { refreshSafeBalance(); refreshEoaBalance(); }}>
                 <span>🔄</span>
-                Refresh
+                Refresh All
               </button>
             </div>
 
@@ -172,8 +243,15 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
 
               <p className="approvals-description">
                 These approvals allow Polymarket contracts to trade on your behalf.
-                You need all 7 approvals to place orders.
+                <br />
+                <strong>All approvals are gasless!</strong>
               </p>
+
+              {!isSafeDeployed && (
+                <div className="approval-warning">
+                  Safe must be deployed first. Click "Deploy Safe" in the Wallet tab.
+                </div>
+              )}
 
               <div className="approvals-list">
                 {approvals.map((approval, idx) => (
@@ -187,13 +265,13 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
                 ))}
               </div>
 
-              {!allApproved && (
+              {isSafeDeployed && !allApproved && (
                 <button
                   className="btn-approve-all"
                   onClick={approveAll}
                   disabled={isApproving}
                 >
-                  {isApproving ? 'Approving...' : `Approve All (${totalApprovals - approvedCount} remaining)`}
+                  {isApproving ? 'Approving...' : `Approve All (Gasless)`}
                 </button>
               )}
 
@@ -206,7 +284,7 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
               <button
                 className="btn-refresh-approvals"
                 onClick={checkApprovals}
-                disabled={isCheckingApprovals}
+                disabled={isCheckingApprovals || !isSafeDeployed}
               >
                 {isCheckingApprovals ? 'Checking...' : 'Refresh Approvals'}
               </button>

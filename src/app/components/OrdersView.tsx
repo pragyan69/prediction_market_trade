@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '../contexts/WalletContext';
+import { useSafe } from '../contexts/SafeContext';
 import { useTrading } from '../contexts/TradingContext';
 
 interface Order {
@@ -18,7 +19,8 @@ interface OrdersViewProps {
 }
 
 export function OrdersView({ showToast }: OrdersViewProps) {
-  const { isConnected, refreshBalance } = useWallet();
+  const { isConnected } = useWallet();
+  const { refreshSafeBalance } = useSafe();
   const { getOpenOrders, cancelOrder, cancelAllOrders, isInitialized } = useTrading();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -63,7 +65,7 @@ export function OrdersView({ showToast }: OrdersViewProps) {
       await cancelOrder(orderId);
       showToast('Order cancelled', 'success');
       await fetchOrders();
-      await refreshBalance();
+      await refreshSafeBalance();
     } catch (error: any) {
       showToast(`Failed: ${error.message}`, 'error');
     } finally {
@@ -81,7 +83,7 @@ export function OrdersView({ showToast }: OrdersViewProps) {
       await cancelAllOrders();
       showToast('All orders cancelled', 'success');
       await fetchOrders();
-      await refreshBalance();
+      await refreshSafeBalance();
     } catch (error: any) {
       showToast(`Failed: ${error.message}`, 'error');
     } finally {
