@@ -1,22 +1,10 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { ethers } from 'ethers';
-import { RelayClient, RelayerTransactionState } from '@polymarket/builder-relayer-client';
 import { deriveSafe } from '@polymarket/builder-relayer-client/dist/builder/derive';
 import { getContractConfig } from '@polymarket/builder-relayer-client/dist/config';
-import { BuilderConfig } from '@polymarket/builder-signing-sdk';
 import { useWallet } from './WalletContext';
 
 const POLYGON_CHAIN_ID = 137;
-const RELAY_URL = 'https://relayer-v2.polymarket.com';
-
-// Builder credentials from environment
-const builderConfig = new BuilderConfig({
-  localBuilderCreds: {
-    key: import.meta.env.VITE_BUILDER_API_KEY || '',
-    secret: import.meta.env.VITE_BUILDER_SECRET || '',
-    passphrase: import.meta.env.VITE_BUILDER_PASSPHRASE || '',
-  },
-});
 
 // Contract addresses on Polygon
 const ADDRESSES = {
@@ -46,6 +34,15 @@ export interface ApprovalStatus {
   spender: string;
 }
 
+// Transaction states from relayer
+const TX_STATE = {
+  PENDING: 'STATE_PENDING',
+  SUBMITTED: 'STATE_SUBMITTED',
+  MINED: 'STATE_MINED',
+  CONFIRMED: 'STATE_CONFIRMED',
+  FAILED: 'STATE_FAILED',
+} as const;
+
 interface SafeContextType {
   // Safe wallet
   safeAddress: string | null;
@@ -58,16 +55,13 @@ interface SafeContextType {
   safeMaticBalance: number;
   refreshSafeBalance: () => Promise<void>;
 
-  // Approvals (gasless via RelayClient)
+  // Approvals (gasless via server API)
   approvals: ApprovalStatus[];
   isCheckingApprovals: boolean;
   isApproving: boolean;
   checkApprovals: () => Promise<void>;
   approveAll: () => Promise<void>;
   allApproved: boolean;
-
-  // RelayClient
-  relayClient: RelayClient | null;
 }
 
 const SafeContext = createContext<SafeContextType | null>(null);
@@ -80,13 +74,29 @@ export function useSafe() {
   return context;
 }
 
+// EIP-712 domain for Safe deployment signature (CreateProxy)
+const getSafeDeployDomain = (chainId: number, safeFactory: string) => ({
+  name: 'Polymarket Contract Proxy Factory',
+  chainId,
+  verifyingContract: safeFactory,
+});
+
+// EIP-712 types for Safe deployment (CreateProxy)
+const SAFE_DEPLOY_TYPES = {
+  CreateProxy: [
+    { name: 'paymentToken', type: 'address' },
+    { name: 'payment', type: 'uint256' },
+    { name: 'paymentReceiver', type: 'address' },
+  ],
+};
+
 export function SafeProvider({ children }: { children: ReactNode }) {
   const { signer, address, provider, isConnected } = useWallet();
 
   const [safeAddress, setSafeAddress] = useState<string | null>(null);
+  const [safeFactoryAddress, setSafeFactoryAddress] = useState<string | null>(null);
   const [isSafeDeployed, setIsSafeDeployed] = useState(false);
   const [isDeployingSafe, setIsDeployingSafe] = useState(false);
-  const [relayClient, setRelayClient] = useState<RelayClient | null>(null);
 
   // Balances
   const [safeUsdceBalance, setSafeUsdceBalance] = useState(0);
@@ -101,6 +111,7 @@ export function SafeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!address) {
       setSafeAddress(null);
+      setSafeFactoryAddress(null);
       return;
     }
 
@@ -108,60 +119,53 @@ export function SafeProvider({ children }: { children: ReactNode }) {
       const config = getContractConfig(POLYGON_CHAIN_ID);
       const derived = deriveSafe(address, config.SafeContracts.SafeFactory);
       setSafeAddress(derived);
+      setSafeFactoryAddress(config.SafeContracts.SafeFactory);
       console.log('[Safe] Derived Safe address:', derived, 'from EOA:', address);
     } catch (error) {
       console.error('[Safe] Failed to derive Safe address:', error);
     }
   }, [address]);
 
-  // Check if Safe is deployed
+  // Check if Safe is deployed (using relayer API)
+  const checkSafeDeployed = useCallback(async (): Promise<boolean> => {
+    if (!safeAddress) return false;
+
+    try {
+      // First check with relayer
+      const response = await fetch(`/api/safe/deployed?address=${safeAddress}`);
+      const data = await response.json();
+      console.log('[Safe] Relayer deployed check:', data);
+      return data.deployed === true;
+    } catch (error) {
+      console.error('[Safe] Failed to check deployment via relayer:', error);
+
+      // Fallback to on-chain check
+      if (provider) {
+        try {
+          const code = await provider.getCode(safeAddress);
+          return code !== '0x';
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    }
+  }, [safeAddress, provider]);
+
   useEffect(() => {
     async function checkDeployment() {
-      if (!safeAddress || !provider) {
+      if (!safeAddress) {
         setIsSafeDeployed(false);
         return;
       }
 
-      try {
-        const code = await provider.getCode(safeAddress);
-        const deployed = code !== '0x';
-        setIsSafeDeployed(deployed);
-        console.log('[Safe] Safe deployed:', deployed);
-      } catch (error) {
-        console.error('[Safe] Failed to check Safe deployment:', error);
-        setIsSafeDeployed(false);
-      }
+      const deployed = await checkSafeDeployed();
+      setIsSafeDeployed(deployed);
+      console.log('[Safe] Safe deployed:', deployed);
     }
 
     checkDeployment();
-  }, [safeAddress, provider]);
-
-  // Initialize RelayClient
-  useEffect(() => {
-    async function initRelayClient() {
-      if (!signer || !address) {
-        setRelayClient(null);
-        return;
-      }
-
-      try {
-        // RelayClient constructor: (relayerUrl, chainId, signer, builderConfig, relayTxType)
-        const client = new RelayClient(
-          RELAY_URL,
-          POLYGON_CHAIN_ID,
-          signer as any,
-          builderConfig
-        );
-
-        setRelayClient(client);
-        console.log('[Safe] RelayClient initialized');
-      } catch (error) {
-        console.error('[Safe] Failed to initialize RelayClient:', error);
-      }
-    }
-
-    initRelayClient();
-  }, [signer, address]);
+  }, [safeAddress, checkSafeDeployed]);
 
   // Refresh Safe balance
   const refreshSafeBalance = useCallback(async () => {
@@ -190,10 +194,43 @@ export function SafeProvider({ children }: { children: ReactNode }) {
     }
   }, [safeAddress, provider, refreshSafeBalance]);
 
-  // Deploy Safe (gasless via RelayClient)
+  // Poll transaction status via server API
+  const pollTransactionStatus = async (txId: string, maxPolls = 40, interval = 3000): Promise<any> => {
+    for (let i = 0; i < maxPolls; i++) {
+      try {
+        const response = await fetch(`/api/safe/status?txId=${txId}`);
+        const result = await response.json();
+
+        console.log(`[Safe] Poll ${i + 1}/${maxPolls} - Status:`, result.state);
+
+        if (result.state === TX_STATE.MINED || result.state === TX_STATE.CONFIRMED) {
+          return result;
+        }
+        if (result.state === TX_STATE.FAILED) {
+          throw new Error('Transaction failed');
+        }
+
+        await new Promise(resolve => setTimeout(resolve, interval));
+      } catch (error) {
+        console.error('[Safe] Poll error:', error);
+        if (i === maxPolls - 1) throw error;
+      }
+    }
+    throw new Error('Transaction timeout');
+  };
+
+  // Deploy Safe (gasless via server API)
   const deploySafe = useCallback(async () => {
-    if (!relayClient || isSafeDeployed) {
-      console.log('[Safe] Cannot deploy - no client or already deployed');
+    if (!signer || !address || !safeAddress || !safeFactoryAddress) {
+      console.log('[Safe] Cannot deploy - missing requirements');
+      return;
+    }
+
+    // Check if already deployed
+    const alreadyDeployed = await checkSafeDeployed();
+    if (alreadyDeployed) {
+      console.log('[Safe] Safe already deployed');
+      setIsSafeDeployed(true);
       return;
     }
 
@@ -201,30 +238,75 @@ export function SafeProvider({ children }: { children: ReactNode }) {
     console.log('[Safe] Deploying Safe...');
 
     try {
-      const response = await relayClient.deploy();
-      console.log('[Safe] Deploy transaction submitted:', response.transactionID);
+      // Sign the deploy message with EIP-712 (CreateProxy)
+      const domain = getSafeDeployDomain(POLYGON_CHAIN_ID, safeFactoryAddress);
+      const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+      const message = {
+        paymentToken: ZERO_ADDRESS,
+        payment: 0n, // Use BigInt
+        paymentReceiver: ZERO_ADDRESS,
+      };
 
-      // Poll until mined
-      const result = await relayClient.pollUntilState(
-        response.transactionID,
-        [
-          RelayerTransactionState.STATE_MINED,
-          RelayerTransactionState.STATE_CONFIRMED,
-          RelayerTransactionState.STATE_FAILED,
-        ],
-        undefined,
-        40,    // maxPolls (40 * 3s = 2 minutes)
-        3000   // 3 second polling interval
-      );
+      console.log('[Safe] Signing deploy message...');
+      console.log('[Safe] Domain:', domain);
+      console.log('[Safe] Message:', message);
+      const signature = await (signer as any)._signTypedData(domain, SAFE_DEPLOY_TYPES, message);
+      console.log('[Safe] Signature obtained:', signature);
 
-      if (!result || result.state === RelayerTransactionState.STATE_FAILED) {
-        throw new Error('Safe deployment failed');
+      // Send to server API
+      const response = await fetch('/api/safe/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eoaAddress: address,
+          signature,
+          proxyAddress: safeAddress,
+          safeFactoryAddress,
+        }),
+      });
+
+      const responseText = await response.text();
+      console.log('[Safe] Deploy response:', response.status, responseText);
+
+      if (!responseText) {
+        throw new Error('Empty response from server');
       }
 
-      console.log('[Safe] Safe deployed successfully at:', result.proxyAddress);
-      setIsSafeDeployed(true);
-      if (result.proxyAddress) {
-        setSafeAddress(result.proxyAddress);
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error(`Invalid JSON response: ${responseText}`);
+      }
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Deploy request failed');
+      }
+      console.log('[Safe] Deploy transaction submitted:', result.transactionID || result.id);
+
+      // Poll for completion
+      const txId = result.transactionID || result.id;
+      if (txId) {
+        console.log('[Safe] Polling for deploy completion...');
+        try {
+          const finalResult = await pollTransactionStatus(txId);
+          console.log('[Safe] Safe deployed successfully!', finalResult);
+        } catch (pollError) {
+          console.log('[Safe] Poll failed, checking deployment directly...');
+          // Even if poll fails, check if actually deployed
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s
+        }
+      }
+
+      // Verify deployment with relayer
+      const deployed = await checkSafeDeployed();
+      if (deployed) {
+        console.log('[Safe] Deployment confirmed with relayer!');
+        setIsSafeDeployed(true);
+      } else {
+        console.log('[Safe] Deployment not yet confirmed, may need more time');
+        // Set optimistically and let UI check again
+        setIsSafeDeployed(true);
       }
     } catch (error) {
       console.error('[Safe] Safe deployment failed:', error);
@@ -232,7 +314,7 @@ export function SafeProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsDeployingSafe(false);
     }
-  }, [relayClient, isSafeDeployed]);
+  }, [signer, address, safeAddress, safeFactoryAddress, checkSafeDeployed]);
 
   // Check approvals for Safe address
   const checkApprovals = useCallback(async () => {
@@ -292,10 +374,40 @@ export function SafeProvider({ children }: { children: ReactNode }) {
     }
   }, [safeAddress, provider, isSafeDeployed, checkApprovals]);
 
-  // Approve all (gasless via RelayClient)
+  // Multisend contract address on Polygon
+  const SAFE_MULTISEND = '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D';
+
+  // Create a multisend transaction from multiple transactions
+  const createMultisendData = (transactions: Array<{ to: string; data: string; value: string; operation: number }>) => {
+    // Encode each transaction for multisend
+    const encodedTxns = transactions.map(tx => {
+      const operation = tx.operation || 0;
+      const to = tx.to;
+      const value = ethers.BigNumber.from(tx.value || '0');
+      const data = tx.data;
+      const dataLength = ethers.utils.hexDataLength(data);
+
+      return ethers.utils.solidityPack(
+        ['uint8', 'address', 'uint256', 'uint256', 'bytes'],
+        [operation, to, value, dataLength, data]
+      );
+    });
+
+    // Concatenate all encoded transactions
+    const packedData = ethers.utils.hexConcat(encodedTxns);
+
+    // Encode the multiSend call
+    const multisendInterface = new ethers.utils.Interface([
+      'function multiSend(bytes memory transactions)',
+    ]);
+
+    return multisendInterface.encodeFunctionData('multiSend', [packedData]);
+  };
+
+  // Approve all (gasless via server API)
   const approveAll = useCallback(async () => {
-    if (!relayClient || !safeAddress) {
-      console.error('[Safe] Cannot approve - no RelayClient or Safe address');
+    if (!signer || !address || !safeAddress) {
+      console.error('[Safe] Cannot approve - no signer or Safe address');
       return;
     }
 
@@ -312,7 +424,7 @@ export function SafeProvider({ children }: { children: ReactNode }) {
     }
 
     setIsApproving(true);
-    console.log('[Safe] Approving', pending.length, 'contracts via RelayClient (gasless)...');
+    console.log('[Safe] Approving', pending.length, 'contracts via server API (gasless)...');
 
     try {
       // Build approval transactions
@@ -325,37 +437,151 @@ export function SafeProvider({ children }: { children: ReactNode }) {
             to: ADDRESSES.USDCe,
             data: usdcInterface.encodeFunctionData('approve', [approval.spender, ethers.constants.MaxUint256]),
             value: '0',
+            operation: 0, // CALL
           };
         } else {
           return {
             to: ADDRESSES.CTF,
             data: ctfInterface.encodeFunctionData('setApprovalForAll', [approval.spender, true]),
             value: '0',
+            operation: 0, // CALL
           };
         }
       });
 
+      // Get nonce from relayer
+      console.log('[Safe] Getting nonce...');
+      const nonceResponse = await fetch(`/api/safe/nonce?address=${address}&type=SAFE`);
+      const nonceData = await nonceResponse.json();
+      // Nonce must be a string for the relayer API
+      const nonce = String(nonceData.nonce || '0');
+      console.log('[Safe] Got nonce:', nonce);
+
+      // Aggregate transactions - single tx or multisend
+      let finalTo: string;
+      let finalData: string;
+      let finalOperation: number;
+
+      if (transactions.length === 1) {
+        finalTo = transactions[0].to;
+        finalData = transactions[0].data;
+        finalOperation = 0; // CALL
+      } else {
+        // Use multisend for multiple transactions
+        finalTo = SAFE_MULTISEND;
+        finalData = createMultisendData(transactions);
+        finalOperation = 1; // DELEGATECALL for multisend
+      }
+
+      // Build EIP-712 struct hash for SafeTx (matching SDK approach)
+      const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+      // Create the EIP-712 typed data hash manually
+      const safeTxDomain = {
+        chainId: POLYGON_CHAIN_ID,
+        verifyingContract: safeAddress,
+      };
+
+      const safeTxTypes = {
+        SafeTx: [
+          { name: 'to', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'data', type: 'bytes' },
+          { name: 'operation', type: 'uint8' },
+          { name: 'safeTxGas', type: 'uint256' },
+          { name: 'baseGas', type: 'uint256' },
+          { name: 'gasPrice', type: 'uint256' },
+          { name: 'gasToken', type: 'address' },
+          { name: 'refundReceiver', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+        ],
+      };
+
+      const safeTxMessage = {
+        to: finalTo,
+        value: ethers.BigNumber.from(0),
+        data: finalData,
+        operation: finalOperation,
+        safeTxGas: ethers.BigNumber.from(0),
+        baseGas: ethers.BigNumber.from(0),
+        gasPrice: ethers.BigNumber.from(0),
+        gasToken: ZERO_ADDRESS,
+        refundReceiver: ZERO_ADDRESS,
+        nonce: ethers.BigNumber.from(nonce),
+      };
+
+      // Compute the EIP-712 typed data hash using ethers._TypedDataEncoder
+      const typedDataHash = ethers.utils._TypedDataEncoder.hash(
+        safeTxDomain,
+        safeTxTypes,
+        safeTxMessage
+      );
+      console.log('[Safe] Computed typed data hash:', typedDataHash);
+
+      // Sign the hash using signMessage (eth_sign / personal_sign)
+      // This matches the SDK's approach: signer.signMessage(structHash)
+      console.log('[Safe] Signing with signMessage...');
+      const signature = await signer.signMessage(ethers.utils.arrayify(typedDataHash));
+      console.log('[Safe] Got signature:', signature.substring(0, 30) + '...');
+
+      // Pack signature in Gnosis format with adjusted v value for eth_sign
+      // v = 27/28 for EIP-712, v = 31/32 for eth_sign (add +4)
+      const sig = ethers.utils.splitSignature(signature);
+      let adjustedV = sig.v;
+      if (adjustedV === 27 || adjustedV === 28) {
+        adjustedV += 4; // Convert to eth_sign format for Gnosis Safe
+      }
+      const packedSig = ethers.utils.solidityPack(
+        ['uint256', 'uint256', 'uint8'],
+        [sig.r, sig.s, adjustedV]
+      );
+      console.log('[Safe] Packed signature (v adjusted to', adjustedV, '):', packedSig.substring(0, 40) + '...');
+
       console.log('[Safe] Submitting', transactions.length, 'approval transactions...');
 
-      // Execute via RelayClient (gasless!)
-      const response = await relayClient.execute(transactions, 'Set token approvals');
-      console.log('[Safe] Approval transaction submitted:', response.transactionID);
+      // Send to server API with correct format
+      const response = await fetch('/api/safe/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: address,
+          to: finalTo,
+          proxyWallet: safeAddress,
+          data: finalData,
+          nonce: nonce,
+          signature: packedSig,
+          signatureParams: {
+            gasPrice: '0',
+            operation: `${finalOperation}`,
+            safeTxnGas: '0',
+            baseGas: '0',
+            gasToken: ZERO_ADDRESS,
+            refundReceiver: ZERO_ADDRESS,
+          },
+          metadata: 'Set token approvals',
+        }),
+      });
 
-      // Poll until mined
-      const result = await relayClient.pollUntilState(
-        response.transactionID,
-        [
-          RelayerTransactionState.STATE_MINED,
-          RelayerTransactionState.STATE_CONFIRMED,
-          RelayerTransactionState.STATE_FAILED,
-        ],
-        undefined,
-        40,
-        3000
-      );
+      const responseText = await response.text();
+      console.log('[Safe] Execute response:', response.status, responseText);
 
-      if (!result || result.state === RelayerTransactionState.STATE_FAILED) {
-        throw new Error('Approval transaction failed');
+      if (!response.ok) {
+        let error;
+        try {
+          error = JSON.parse(responseText);
+        } catch {
+          error = { error: responseText };
+        }
+        throw new Error(error.error || 'Execute request failed');
+      }
+
+      const result = JSON.parse(responseText);
+      console.log('[Safe] Approval transaction submitted:', result.transactionID || result.id);
+
+      // Poll for completion
+      const txId = result.transactionID || result.id;
+      if (txId) {
+        await pollTransactionStatus(txId);
       }
 
       console.log('[Safe] Approvals set successfully!');
@@ -366,7 +592,7 @@ export function SafeProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsApproving(false);
     }
-  }, [relayClient, safeAddress, isSafeDeployed, deploySafe, approvals, checkApprovals]);
+  }, [signer, address, safeAddress, isSafeDeployed, deploySafe, approvals, checkApprovals]);
 
   const allApproved = approvals.length > 0 && approvals.every(a => a.approved);
 
@@ -384,7 +610,6 @@ export function SafeProvider({ children }: { children: ReactNode }) {
     checkApprovals,
     approveAll,
     allApproved,
-    relayClient,
   };
 
   return (

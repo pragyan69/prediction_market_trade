@@ -12,14 +12,18 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.0",
+    "crypto-browserify": "^3.12.1",
+    "stream-browserify": "^3.0.0",
     "typescript": "~5.9.3",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vite-plugin-node-polyfills": "^0.25.0"
   },
   "dependencies": {
     "@polymarket/builder-relayer-client": "^0.0.8",
     "@polymarket/builder-signing-sdk": "^0.0.8",
     "@polymarket/clob-client": "^5.2.1",
     "@privy-io/react-auth": "^1.88.0",
+    "buffer": "^6.0.3",
     "ethers": "5.8.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
