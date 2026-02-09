@@ -6,7 +6,10 @@ const POLYGON_CHAIN_ID = 137;
 
 // USDC.e address on Polygon
 const USDC_E_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
-const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
+const ERC20_ABI = [
+  'function balanceOf(address) view returns (uint256)',
+  'function transfer(address to, uint256 amount) returns (bool)',
+];
 
 type LoginMethod = 'google' | 'twitter' | 'discord' | 'email' | 'wallet' | null;
 
@@ -34,6 +37,8 @@ interface WalletContextType {
   // Actions
   connect: () => void;
   disconnect: () => Promise<void>;
+  transferUsdceToSafe: (amount: number, safeAddress: string) => Promise<string>;
+  isTransferring: boolean;
 }
 
 const WalletContext = createContext<WalletContextType | null>(null);
@@ -60,6 +65,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [walletIcon, setWalletIcon] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [loginMethod, setLoginMethod] = useState<LoginMethod>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
 
   // Get user display name
   const userName = user?.google?.name || user?.twitter?.name || user?.discord?.username || user?.email?.address || null;
@@ -219,6 +225,81 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setLoginMethod(null);
   }, [logout]);
 
+  // Transfer USDC.e from EOA to Safe
+  const transferUsdceToSafe = useCallback(async (amount: number, safeAddress: string): Promise<string> => {
+    if (!address) {
+      throw new Error('Wallet not connected');
+    }
+    if (amount <= 0) {
+      throw new Error('Amount must be greater than 0');
+    }
+    if (amount > eoaUsdceBalance) {
+      throw new Error('Insufficient balance');
+    }
+
+    // Get the active wallet fresh from Privy
+    const embeddedWallet = wallets.find(w => w.walletClientType === 'privy');
+    const externalWallet = wallets.find(w => w.walletClientType !== 'privy');
+    const activeWallet = loginMethod === 'wallet' ? externalWallet : (embeddedWallet || externalWallet);
+
+    if (!activeWallet) {
+      throw new Error('No wallet available');
+    }
+
+    setIsTransferring(true);
+    console.log('[Wallet] Transferring', amount, 'USDC.e to Safe:', safeAddress);
+
+    try {
+      // Ensure wallet is on Polygon
+      console.log('[Wallet] Switching to Polygon for transfer...');
+      try {
+        await activeWallet.switchChain(POLYGON_CHAIN_ID);
+      } catch (e) {
+        console.warn('[Wallet] Chain switch warning:', e);
+      }
+
+      // Get fresh provider and signer
+      const ethereumProvider = await activeWallet.getEthereumProvider();
+      const freshProvider = new ethers.providers.Web3Provider(ethereumProvider as any);
+      const freshSigner = freshProvider.getSigner();
+
+      // Verify we're on Polygon
+      const network = await freshProvider.getNetwork();
+      console.log('[Wallet] Current network:', network.chainId);
+      if (network.chainId !== POLYGON_CHAIN_ID) {
+        throw new Error(`Please switch to Polygon network. Current: ${network.chainId}`);
+      }
+
+      // Check POL balance for gas
+      const polBalance = await freshProvider.getBalance(address);
+      console.log('[Wallet] POL balance for gas:', ethers.utils.formatEther(polBalance));
+      if (polBalance.isZero()) {
+        throw new Error('Need POL for gas fees');
+      }
+
+      const usdc = new ethers.Contract(USDC_E_ADDRESS, ERC20_ABI, freshSigner);
+      // USDC.e has 6 decimals
+      const amountInWei = ethers.utils.parseUnits(amount.toString(), 6);
+
+      console.log('[Wallet] Sending transfer transaction...');
+      const tx = await usdc.transfer(safeAddress, amountInWei);
+      console.log('[Wallet] Transfer tx submitted:', tx.hash);
+
+      const receipt = await tx.wait();
+      console.log('[Wallet] Transfer confirmed:', receipt.transactionHash);
+
+      // Refresh balances after transfer
+      await refreshEoaBalance();
+
+      return receipt.transactionHash;
+    } catch (error: any) {
+      console.error('[Wallet] Transfer failed:', error);
+      throw error;
+    } finally {
+      setIsTransferring(false);
+    }
+  }, [address, eoaUsdceBalance, refreshEoaBalance, wallets, loginMethod]);
+
   const value: WalletContextType = {
     isConnected: authenticated && !!address,
     isReady: ready && walletsReady,
@@ -236,6 +317,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     refreshEoaBalance,
     connect,
     disconnect,
+    transferUsdceToSafe,
+    isTransferring,
   };
 
   return (

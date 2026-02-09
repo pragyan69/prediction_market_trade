@@ -329,7 +329,14 @@ function polymarketApiPlugin(env: Record<string, string>): Plugin {
           });
 
           const resultText = await response.text();
-          console.log('[API] Status response:', response.status, resultText.substring(0, 200));
+          // Parse and log the state for debugging
+          try {
+            const parsed = JSON.parse(resultText);
+            const state = Array.isArray(parsed) ? parsed[0]?.state : parsed?.state;
+            console.log('[API] Status response:', response.status, 'state:', state);
+          } catch {
+            console.log('[API] Status response:', response.status, resultText.substring(0, 200));
+          }
 
           res.setHeader('Content-Type', 'application/json');
           if (!response.ok) {

@@ -201,12 +201,16 @@ export function SafeProvider({ children }: { children: ReactNode }) {
         const response = await fetch(`/api/safe/status?txId=${txId}`);
         const result = await response.json();
 
-        console.log(`[Safe] Poll ${i + 1}/${maxPolls} - Status:`, result.state);
+        // Response is an array of transactions
+        const tx = Array.isArray(result) ? result[0] : result;
+        const state = tx?.state;
 
-        if (result.state === TX_STATE.MINED || result.state === TX_STATE.CONFIRMED) {
-          return result;
+        console.log(`[Safe] Poll ${i + 1}/${maxPolls} - Status:`, state);
+
+        if (state === TX_STATE.MINED || state === TX_STATE.CONFIRMED) {
+          return tx;
         }
-        if (result.state === TX_STATE.FAILED) {
+        if (state === TX_STATE.FAILED) {
           throw new Error('Transaction failed');
         }
 

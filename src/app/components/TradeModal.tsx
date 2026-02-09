@@ -307,14 +307,27 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
               </div>
             )}
 
+            {!isInitialized && isConnected && !isDerivingCreds && (
+              <div className="trade-info">
+                Initializing trading client...
+              </div>
+            )}
+
+            {safeUsdceBalance === 0 && isConnected && (
+              <div className="trade-warning">
+                Transfer USDC.e to your Safe wallet to trade
+              </div>
+            )}
+
             {/* Submit */}
             <button
               className={`btn-trade ${side.toLowerCase()}`}
               onClick={isConnected ? handleSubmit : connect}
-              disabled={isConnected && (!canSubmit || isSubmitting || isDerivingCreds)}
+              disabled={isConnected && (!canSubmit || isSubmitting || isDerivingCreds || !isInitialized)}
             >
               {!isConnected ? 'Connect Wallet' :
-               isDerivingCreds ? 'Setting up...' :
+               isDerivingCreds ? 'Deriving API Keys...' :
+               !isInitialized ? 'Initializing...' :
                isSubmitting ? 'Processing...' :
                side === 'BUY' ? 'Buy Shares' : 'Sell Shares'}
             </button>

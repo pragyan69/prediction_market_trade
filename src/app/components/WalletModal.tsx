@@ -1,6 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useWallet } from '../contexts/WalletContext';
 import { useSafe } from '../contexts/SafeContext';
+
+interface ToastInfo {
+  message: string;
+  type: 'success' | 'error';
+}
 
 interface WalletModalProps {
   isOpen: boolean;
@@ -18,6 +23,8 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
     eoaUsdceBalance,
     eoaMaticBalance,
     refreshEoaBalance,
+    transferUsdceToSafe,
+    isTransferring,
   } = useWallet();
 
   const {
@@ -38,6 +45,46 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
 
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'wallet' | 'approvals'>('wallet');
+  const [transferAmount, setTransferAmount] = useState('');
+  const [toast, setToast] = useState<ToastInfo | null>(null);
+
+  // Clear toast after 3 seconds
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const handleTransfer = async () => {
+    if (!safeAddress) {
+      setToast({ message: 'Safe address not available', type: 'error' });
+      return;
+    }
+    const amount = Number(transferAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setToast({ message: 'Enter a valid amount', type: 'error' });
+      return;
+    }
+    if (amount > eoaUsdceBalance) {
+      setToast({ message: 'Amount exceeds your EOA balance', type: 'error' });
+      return;
+    }
+
+    try {
+      const txHash = await transferUsdceToSafe(amount, safeAddress);
+      setToast({ message: `Transfer successful! Tx: ${txHash.slice(0, 10)}...`, type: 'success' });
+      setTransferAmount('');
+      // Refresh Safe balance
+      refreshSafeBalance();
+    } catch (error: any) {
+      setToast({ message: `Transfer failed: ${error.message}`, type: 'error' });
+    }
+  };
+
+  const setMaxAmount = () => {
+    setTransferAmount(eoaUsdceBalance.toFixed(6));
+  };
 
   if (!isOpen) return null;
 
@@ -83,6 +130,12 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="wallet-modal" onClick={(e) => e.stopPropagation()}>
+        {/* Toast notification */}
+        {toast && (
+          <div className={`wallet-toast ${toast.type}`}>
+            {toast.message}
+          </div>
+        )}
         <div className="wallet-modal-header">
           <h2>Wallet</h2>
           <button className="modal-close" onClick={onClose}>×</button>
@@ -194,11 +247,37 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
               </div>
             </div>
 
-            {/* Transfer Instructions */}
-            {eoaUsdceBalance > 0 && safeUsdceBalance === 0 && (
-              <div className="deposit-info" style={{ background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)' }}>
-                <p className="deposit-text" style={{ color: 'var(--yellow)' }}>
-                  Your USDC.e is in your EOA. Transfer it to your Safe to trade.
+            {/* Transfer to Safe Section */}
+            {eoaUsdceBalance > 0 && safeAddress && (
+              <div className="transfer-section">
+                <label>Transfer USDC.e to Safe</label>
+                <div className="transfer-form">
+                  <div className="transfer-input-row">
+                    <input
+                      type="number"
+                      placeholder="Amount"
+                      value={transferAmount}
+                      onChange={(e) => setTransferAmount(e.target.value)}
+                      disabled={isTransferring}
+                      step="0.01"
+                      min="0"
+                      max={eoaUsdceBalance}
+                    />
+                    <button className="btn-max" onClick={setMaxAmount} disabled={isTransferring}>
+                      Max
+                    </button>
+                  </div>
+                  <button
+                    className="btn-transfer"
+                    onClick={handleTransfer}
+                    disabled={isTransferring || !transferAmount || Number(transferAmount) <= 0}
+                  >
+                    {isTransferring ? 'Transferring...' : 'Transfer to Safe'}
+                  </button>
+                </div>
+                <p className="transfer-note">
+                  You have ${eoaUsdceBalance.toFixed(2)} USDC.e in your EOA.
+                  Transfer to Safe to trade on Polymarket.
                 </p>
               </div>
             )}
