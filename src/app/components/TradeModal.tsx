@@ -29,6 +29,8 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
   const [amount, setAmount] = useState(String(market.minSize || 10));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderBook, setOrderBook] = useState<{ bids: OrderBookLevel[]; asks: OrderBookLevel[] }>({ bids: [], asks: [] });
+  const [orderbookError, setOrderbookError] = useState<string | null>(null);
+  const [isLoadingBook, setIsLoadingBook] = useState(true);
 
   // Refresh balances when modal opens
   useEffect(() => {
@@ -41,16 +43,40 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
   useEffect(() => {
     async function fetchBook() {
       const tokenId = market.clobTokenIds[selectedOutcome];
-      if (!tokenId) return;
+      if (!tokenId) {
+        setOrderbookError('No token ID for this outcome');
+        setIsLoadingBook(false);
+        return;
+      }
+
+      setIsLoadingBook(true);
+      setOrderbookError(null);
 
       try {
         const book = await getOrderBook(tokenId);
-        setOrderBook({
-          bids: book.bids || [],
-          asks: book.asks || [],
-        });
-      } catch (error) {
+
+        // Check if orderbook has any data
+        if (!book || (!book.bids?.length && !book.asks?.length)) {
+          setOrderbookError('No active orderbook for this market');
+          setOrderBook({ bids: [], asks: [] });
+        } else {
+          setOrderBook({
+            bids: book.bids || [],
+            asks: book.asks || [],
+          });
+          setOrderbookError(null);
+        }
+      } catch (error: any) {
         console.error('Failed to fetch order book:', error);
+        const errorMsg = error?.response?.data?.error || error?.message || 'Failed to load orderbook';
+        if (errorMsg.includes('does not exist')) {
+          setOrderbookError('This market orderbook does not exist. Try a different market.');
+        } else {
+          setOrderbookError(errorMsg);
+        }
+        setOrderBook({ bids: [], asks: [] });
+      } finally {
+        setIsLoadingBook(false);
       }
     }
 
@@ -84,9 +110,12 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
   const profitPct = totalCost > 0 ? (potentialProfit / totalCost) * 100 : 0;
 
   // Validation
+  const MIN_ORDER_VALUE = 1; // Polymarket requires minimum $1 order value
   const insufficientBalance = side === 'BUY' && totalCost > safeUsdceBalance;
   const belowMinSize = amountNum < market.minSize;
-  const canSubmit = isConnected && isInitialized && !insufficientBalance && !belowMinSize && priceNum > 0 && amountNum > 0;
+  const belowMinValue = totalCost < MIN_ORDER_VALUE;
+  const hasValidOrderbook = !orderbookError && (orderBook.bids.length > 0 || orderBook.asks.length > 0);
+  const canSubmit = isConnected && isInitialized && !insufficientBalance && !belowMinSize && !belowMinValue && priceNum > 0 && amountNum > 0 && hasValidOrderbook && !isLoadingBook;
 
   // Submit trade
   const handleSubmit = async () => {
@@ -301,6 +330,12 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
               </div>
             )}
 
+            {belowMinValue && !belowMinSize && (
+              <div className="trade-warning">
+                Min order value: $1.00 (current: ${totalCost.toFixed(2)})
+              </div>
+            )}
+
             {!isSafeDeployed && isConnected && (
               <div className="trade-info">
                 Safe will be deployed automatically (gasless)
@@ -319,6 +354,18 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
               </div>
             )}
 
+            {orderbookError && (
+              <div className="trade-warning">
+                {orderbookError}
+              </div>
+            )}
+
+            {isLoadingBook && (
+              <div className="trade-info">
+                Loading orderbook...
+              </div>
+            )}
+
             {/* Submit */}
             <button
               className={`btn-trade ${side.toLowerCase()}`}
@@ -328,6 +375,8 @@ export function TradeModal({ market, onClose, showToast }: TradeModalProps) {
               {!isConnected ? 'Connect Wallet' :
                isDerivingCreds ? 'Deriving API Keys...' :
                !isInitialized ? 'Initializing...' :
+               isLoadingBook ? 'Loading Orderbook...' :
+               orderbookError ? 'Market Unavailable' :
                isSubmitting ? 'Processing...' :
                side === 'BUY' ? 'Buy Shares' : 'Sell Shares'}
             </button>

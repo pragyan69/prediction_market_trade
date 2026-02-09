@@ -27,12 +27,14 @@ export interface Market {
 
 interface MarketsViewProps {
   onSelectMarket: (market: Market) => void;
+  invalidMarketIds?: Set<string>;
+  isValidating?: boolean;
 }
 
 type SortOption = 'volume24hr' | 'liquidity' | 'newest' | 'ending';
 type LayoutOption = 'grid' | 'list';
 
-export function MarketsView({ onSelectMarket }: MarketsViewProps) {
+export function MarketsView({ onSelectMarket, invalidMarketIds = new Set(), isValidating = false }: MarketsViewProps) {
   const { subscribeToMarket, subscribeToAsset, onMessage } = useWebSocket();
 
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -50,26 +52,31 @@ export function MarketsView({ onSelectMarket }: MarketsViewProps) {
         const response = await fetch(`${CORS_PROXY}${encodeURIComponent(apiUrl)}`);
         const data = await response.json();
 
-        const parsed: Market[] = data.map((m: any) => ({
-          id: m.id,
-          question: m.question,
-          conditionId: m.conditionId,
-          slug: m.slug,
-          image: m.image || m.icon || '',
-          outcomes: JSON.parse(m.outcomes || '["Yes","No"]'),
-          outcomePrices: JSON.parse(m.outcomePrices || '[0.5,0.5]').map(Number),
-          clobTokenIds: JSON.parse(m.clobTokenIds || '[]'),
-          volume24hr: Number(m.volume24hr || 0),
-          liquidity: Number(m.liquidityNum || m.liquidity || 0),
-          negRisk: m.negRisk ?? false,
-          tickSize: Number(m.orderPriceMinTickSize || 0.01),
-          minSize: Number(m.orderMinSize || 1),
-          bestBid: Number(m.bestBid || 0),
-          bestAsk: Number(m.bestAsk || 1),
-          oneDayPriceChange: Number(m.oneDayPriceChange || 0),
-          endDate: m.endDate || '',
-        }));
+        const parsed: Market[] = data
+          .map((m: any) => ({
+            id: m.id,
+            question: m.question,
+            conditionId: m.conditionId,
+            slug: m.slug,
+            image: m.image || m.icon || '',
+            outcomes: JSON.parse(m.outcomes || '["Yes","No"]'),
+            outcomePrices: JSON.parse(m.outcomePrices || '[0.5,0.5]').map(Number),
+            clobTokenIds: JSON.parse(m.clobTokenIds || '[]'),
+            volume24hr: Number(m.volume24hr || 0),
+            liquidity: Number(m.liquidityNum || m.liquidity || 0),
+            negRisk: m.negRisk ?? false,
+            tickSize: Number(m.orderPriceMinTickSize || 0.01),
+            minSize: Number(m.orderMinSize || 1),
+            bestBid: Number(m.bestBid || 0),
+            bestAsk: Number(m.bestAsk || 1),
+            oneDayPriceChange: Number(m.oneDayPriceChange || 0),
+            endDate: m.endDate || '',
+          }))
+          // Filter out markets with low/no liquidity or no clobTokenIds
+          // Require minimum $100 liquidity to ensure orderbook exists
+          .filter((m: Market) => m.liquidity >= 100 && m.clobTokenIds.length >= 2);
 
+        console.log('[Markets] Loaded', parsed.length, 'markets with sufficient liquidity');
         setMarkets(parsed);
 
         // Subscribe to WebSocket for live updates
@@ -133,6 +140,7 @@ export function MarketsView({ onSelectMarket }: MarketsViewProps) {
 
   // Filter and sort markets
   const filteredMarkets = markets
+    .filter(m => !invalidMarketIds.has(m.id)) // Exclude markets with invalid orderbooks
     .filter(m => m.question.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
       switch (sortBy) {
@@ -152,6 +160,16 @@ export function MarketsView({ onSelectMarket }: MarketsViewProps) {
 
   return (
     <div id="marketsView" className="view active">
+      {/* Validation overlay */}
+      {isValidating && (
+        <div className="validation-overlay">
+          <div className="validation-spinner">
+            <div className="spinner"></div>
+            <span>Checking market...</span>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="toolbar">
         <div className="search-box">

@@ -326,6 +326,33 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* Validation Overlay */
+.validation-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.validation-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.validation-spinner .spinner {
+  margin-bottom: 0;
+}
+
 /* Market Card */
 .market-card {
   background: var(--bg-secondary);

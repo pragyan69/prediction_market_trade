@@ -7,6 +7,13 @@ import { useSafe } from './SafeContext';
 const HOST = 'https://clob.polymarket.com';
 const CHAIN_ID = 137;
 
+// Signature types for Polymarket
+// 0 = EOA (standard wallet)
+// 1 = POLY_PROXY
+// 2 = POLY_GNOSIS_SAFE (for Safe wallets)
+const SIGNATURE_TYPE_EOA = 0;
+const SIGNATURE_TYPE_POLY_GNOSIS_SAFE = 2;
+
 interface TradingContextType {
   client: ClobClient | null;
   apiCreds: ApiKeyCreds | null;
@@ -96,19 +103,23 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
         setApiCreds(creds);
 
-        // Create client with Safe address as the proxy address
+        // Create client with Safe address as the funder/proxy address
         // Orders are signed by EOA but execute from Safe
+        // IMPORTANT: Use signature type 2 (POLY_GNOSIS_SAFE) for Safe wallets
         const clobClient = new ClobClient(
           HOST,
           CHAIN_ID,
           signer as any,
           creds,
-          0, // feeRateBps
-          safeAddress // proxy address (Safe wallet)
+          SIGNATURE_TYPE_POLY_GNOSIS_SAFE, // Signature type for Gnosis Safe
+          safeAddress // funder address (Safe wallet)
         );
 
         setClient(clobClient);
-        console.log('[Trading] CLOB client initialized with Safe:', safeAddress);
+        console.log('[Trading] CLOB client initialized');
+        console.log('[Trading] - EOA Signer:', address);
+        console.log('[Trading] - Safe/Funder:', safeAddress);
+        console.log('[Trading] - Signature Type:', SIGNATURE_TYPE_POLY_GNOSIS_SAFE, '(POLY_GNOSIS_SAFE)');
 
       } catch (error) {
         console.error('[Trading] Failed to initialize client:', error);
@@ -147,6 +158,24 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
     console.log('[Trading] Placing order...', params);
 
+    // Validate orderbook exists before placing order
+    try {
+      const orderbook = await client.getOrderBook(params.tokenId);
+      if (!orderbook || (!orderbook.bids?.length && !orderbook.asks?.length)) {
+        throw new Error('This market has no active orderbook. Try a different market with more liquidity.');
+      }
+      console.log('[Trading] Orderbook validated:', orderbook.bids?.length, 'bids,', orderbook.asks?.length, 'asks');
+    } catch (error: any) {
+      if (error.message?.includes('no active orderbook')) {
+        throw error;
+      }
+      // If orderbook fetch fails with specific error, the market is invalid
+      if (error?.response?.status === 400 || error?.response?.data?.error?.includes('does not exist')) {
+        throw new Error('This market orderbook does not exist. The market may be resolved or inactive.');
+      }
+      console.warn('[Trading] Orderbook check warning:', error.message);
+    }
+
     const response = await client.createAndPostOrder(
       {
         tokenID: params.tokenId,
@@ -162,6 +191,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     );
 
     console.log('[Trading] Order placed:', response);
+
+    // Check if response indicates an error
+    if (response.error || response.status === 400) {
+      throw new Error(response.error || 'Order failed');
+    }
 
     return {
       orderID: response.orderID || '',
